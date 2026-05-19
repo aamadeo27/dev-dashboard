@@ -4,56 +4,61 @@
   /* ------------------------------------------------------------------ */
 
   /* Backgrounds */
-  --bg-base: #0f1117;
-  --bg-surface: #1a1d27;
-  --bg-elevated: #22263a;
-  --bg-hover: #2a2f47;
+  --bg-base: #0f1117; /* Main window background */
+  --bg-surface: #1a1d27; /* Cards, panels, sidebars */
+  --bg-elevated: #22263a; /* Modals, popovers, dropdowns */
+  --bg-hover: #2a2f47; /* Hover state on interactive surfaces */
 
   /* Borders */
-  --border-subtle: #2e334d;
-  --border-strong: #4a5080;
+  --border-subtle: #2e334d; /* Dividers, card borders */
+  --border-strong: #4a5080; /* Focused inputs, active states */
 
-  /* Primary */
+  /* Primary — violet; active nav, primary actions */
   --primary: #7c6af7;
   --primary-hover: #9182f9;
-  --primary-dim: #3d3578;
+  --primary-dim: #3d3578; /* Tint background for primary-colored areas */
 
-  /* Accent */
+  /* Accent — amber; quick-run button, highlights */
   --accent: #f5a623;
   --accent-hover: #f7b84b;
 
   /* Text */
-  --text-primary: #e8eaf2;
-  --text-secondary: #8a90b0;
-  --text-disabled: #4a5070;
-  --text-on-primary: #ffffff;
+  --text-primary: #e8eaf2; /* Body text, labels */
+  --text-secondary: #8a90b0; /* Timestamps, metadata */
+  --text-disabled: #4a5070; /* Disabled controls */
+  --text-on-primary: #ffffff; /* Text on primary-colored surfaces */
 
-  /* Semantic */
-  --success: #3dd68c;
-  --success-dim: #1a4a35;
-  --warning: #f5a623;
-  --warning-dim: #4a3a10;
-  --error: #f2535a;
-  --error-dim: #4a1a1d;
+  /* Semantic state colors */
+  --success: #3dd68c; /* Completed status, clean git */
+  --success-dim: #1a4a35; /* Success tint backgrounds */
+  --warning: #f5a623; /* Ahead/behind git, warnings */ /* same amber as --accent; update both if palette changes */
+  --warning-dim: #4a3a10; /* Warning tint backgrounds */
+  --error: #f2535a; /* Failed status, errors, dirty git */
+  --error-dim: #4a1a1d; /* Error tint backgrounds */
 
-  /* Status */
-  --stopped: #8a90b0;
-  --running: #7c6af7;
-  --thinking: #9182f9;
-  --tool-call: #3abfcf;
-  --file-edit: #f5a623;
+  /* Run/event status colors */
+  --stopped: #8a90b0; /* Stopped run status */
+  --running: #7c6af7; /* Running status indicator */
+  --thinking: #9182f9; /* Thinking block highlight */
+  --tool-call: #3abfcf; /* Tool call event highlight */
+  --file-edit: #f5a623; /* File edit event highlight */
 
   /* ------------------------------------------------------------------ */
   /* Typography (UI spec §1.2)                                           */
   /* ------------------------------------------------------------------ */
 
-  /* Font sizes */
+  /* Font sizes — spec roles:
+     xs  = 11px  metadata / timestamps
+     sm  = 13px  body / labels
+     base = 14px section headings
+     code = 12px code / paths / diffs / run event text
+     lg  = 18px  app name / screen title
+  */
   --font-size-xs: 11px;
   --font-size-sm: 13px;
   --font-size-base: 14px;
-  --font-size-md: 15px;
+  --font-size-code: 12px; /* monospace: paths, diffs, run event text */
   --font-size-lg: 18px;
-  --font-size-xl: 24px;
 
   /* Font weights */
   --font-weight-regular: 400;
@@ -65,50 +70,34 @@
   --line-height-code: 1.6;
 
   /* ------------------------------------------------------------------ */
-  /* Spacing Scale (UI spec §1.3) — base 4px grid                       */
+  /* Spacing Scale (UI spec §1.3) — base 4px grid: 4/8/12/16/24/32/48  */
   /* ------------------------------------------------------------------ */
 
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 20px;
   --space-6: 24px;
-  --space-7: 28px;
   --space-8: 32px;
-  --space-9: 36px;
-  --space-10: 40px;
-  --space-11: 44px;
   --space-12: 48px;
 
   /* ------------------------------------------------------------------ */
   /* Border Radius (UI spec §1.4)                                        */
+  /* Cards/popovers/toasts: 8px  Buttons/inputs: 6px  Tags/chips: 4px  */
   /* ------------------------------------------------------------------ */
 
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  --radius-sm: 4px; /* Tags, chips */
+  --radius-md: 6px; /* Buttons, inputs */
+  --radius-lg: 8px; /* Cards, popovers, toasts */
 
   /* ------------------------------------------------------------------ */
   /* Motion (UI spec §1.6)                                               */
+  /* fast=150ms hover/focus  base=200ms modal/toast  slow=300ms max     */
   /* ------------------------------------------------------------------ */
 
-  --duration-fast: 150ms;
-  --duration-base: 200ms;
-  --duration-slow: 300ms;
+  --duration-fast: 150ms; /* Hover / focus transitions */
+  --duration-base: 200ms; /* Modal open, toast slide-in */
+  --duration-slow: 300ms; /* Maximum — no animation exceeds this */
 
   --easing-out: ease-out;
-}
-
-/* ------------------------------------------------------------------ */
-/* Reduced motion (UI spec §1.6)                                       */
-/* ------------------------------------------------------------------ */
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
 }

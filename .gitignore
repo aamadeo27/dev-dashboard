@@ -27,4 +27,3 @@ dist-ssr
 .env*.local
 .dev-data/
 src-tauri/target/
-docs/tasks/

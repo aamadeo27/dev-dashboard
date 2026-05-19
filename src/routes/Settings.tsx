@@ -1,3 +1,3 @@
 export default function Settings() {
-  return <div>S-07 Settings</div>;
+  return <div style={{ color: "var(--text-primary)", padding: "1rem" }}>S-07 Settings</div>;
 }

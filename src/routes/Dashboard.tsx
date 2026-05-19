@@ -1,3 +1,3 @@
 export default function Dashboard() {
-  return <div>S-02 Dashboard</div>;
+  return <div style={{ color: "var(--text-primary)", padding: "1rem" }}>S-02 Dashboard</div>;
 }

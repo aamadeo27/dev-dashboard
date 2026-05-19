@@ -7,20 +7,37 @@ const ProjectDetail = React.lazy(() => import("./routes/ProjectDetail"));
 const RunLive = React.lazy(() => import("./routes/RunLive"));
 const RunHistorical = React.lazy(() => import("./routes/RunHistorical"));
 const Settings = React.lazy(() => import("./routes/Settings"));
-// S-06 Launch Modal: not a route — rendered as overlay within route components
+
+// S-06 LaunchModal is NOT a route — it is a modal overlay rendered inside
+// ProjectDetail (S-03) and Dashboard (S-02). It never gets its own URL.
+
+const suspenseFallback = <div style={{ background: "var(--bg-base)", minHeight: "100vh" }} />;
 
 export default function App() {
   return (
     <HashRouter>
-      <Suspense fallback={null}>
+      <Suspense fallback={suspenseFallback}>
         <Routes>
+          {/* S-01 Setup — shown when Claude CLI is missing */}
           <Route path="/setup" element={<Setup />} />
-          <Route path="/projects" element={<Dashboard />} />
+
+          {/* S-02 Dashboard — primary screen */}
+          <Route path="/" element={<Dashboard />} />
+
+          {/* S-03 Project Detail */}
           <Route path="/projects/:projectId" element={<ProjectDetail />} />
-          <Route path="/projects/:projectId/runs/:runId/live" element={<RunLive />} />
-          <Route path="/projects/:projectId/runs/:runId" element={<RunHistorical />} />
+
+          {/* S-04 Run View (Live) */}
+          <Route path="/runs/:runId/live" element={<RunLive />} />
+
+          {/* S-05 Run View (Historical) */}
+          <Route path="/runs/:runId/history" element={<RunHistorical />} />
+
+          {/* S-07 Settings */}
           <Route path="/settings" element={<Settings />} />
-          <Route path="/" element={<Navigate to="/projects" replace />} />
+
+          {/* Catch-all: redirect unknown routes to Dashboard */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </HashRouter>

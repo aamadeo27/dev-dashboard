@@ -9,18 +9,43 @@ pub(crate) mod sequences;
 pub(crate) mod settings;
 pub(crate) mod usage;
 
+use app_state::AppState;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // TODO: resolve config_dir before builder (requires tauri::api::path or dirs crate)
-    // For now, init logging with a temporary path; wire proper path in T9.x when AppState lands.
-    let log_dir = std::env::temp_dir().join("dev-dashboard").join("logs");
-    let _log_guard = logging::init_logging(&log_dir);
+    // Resolve config directory.
+    //
+    // Priority:
+    //   1. `DEV_DASHBOARD_CONFIG_DIR` env var (useful for dev/testing overrides).
+    //   2. OS-standard config dir (`dirs::config_dir()`) joined with "dev-dashboard".
+    //   3. Fallback: temp dir joined with "dev-dashboard" (should never be needed in
+    //      practice, but avoids an unwrap panic on unusual OS configurations).
+    let config_dir = if let Ok(override_dir) = std::env::var("DEV_DASHBOARD_CONFIG_DIR") {
+        std::path::PathBuf::from(override_dir)
+    } else {
+        dirs::config_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("dev-dashboard")
+    };
+
+    let log_guard = logging::init_logging(&config_dir.join("logs"));
+
+    tracing::info!(config_dir = %config_dir.display(), "config dir resolved");
+
+    let state = AppState {
+        config_dir,
+        log_guard,
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![])
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            ipc::commands::ping,
+            ipc::commands::ping_error,
+        ])
         .run(tauri::generate_context!())
         .expect("Tauri application failed to start — check logs for initialization errors");
 }

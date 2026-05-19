@@ -52,7 +52,7 @@ code,
 pre,
 kbd {
   font-family: ui-monospace, "Cascadia Code", "Fira Code", "Consolas", "Menlo", monospace;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-code);
   line-height: var(--line-height-code);
 }
 
@@ -81,4 +81,25 @@ kbd {
 html {
   scrollbar-width: thin;
   scrollbar-color: var(--border-subtle) transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion (UI spec §1.6)                                       */
+/* Sets durations to 0ms on :root so all CSS variable-driven           */
+/* transitions and animations are suppressed system-wide.              */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
+  }
 }
