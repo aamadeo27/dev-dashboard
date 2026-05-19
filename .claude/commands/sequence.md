@@ -7,7 +7,7 @@ You are the orchestrator for a process sequence.
 
 ## What to do
 
-1. Take the argument: `$ARGUMENTS`.
+1. Take the argument: `$ARGUMENTS`. If the user appended `user-decides-tech` (or `udt`) as an extra token, set the **tech-decision mode** to `user`. Otherwise default to `autonomous` (Architect decides technical issues).
 2. Find the matching file in `.claude/sequences/`. Match by suffix, ignoring leading digits and the `.md` extension.
    - `pre-project`        → `.claude/sequences/01-pre-project.md`
    - `bootstrap`          → `.claude/sequences/02-bootstrap.md`
@@ -21,10 +21,11 @@ You are the orchestrator for a process sequence.
    - `test-backfill` / `backfill` → `.claude/sequences/10-test-backfill.md`
    - `review-fix-loop` / `review` → `.claude/sequences/11-review-fix-loop.md`
    - `monitoring-rollout` / `monitoring` → `.claude/sequences/12-monitoring-rollout.md`
+   - `epic-execution` / `epic` → `.claude/sequences/13-epic-execution.md`
 3. If no argument or no match: list available sequences and stop.
 4. Read the matching sequence file in full.
 5. Verify the **Inputs** listed in the sequence are present. If any are missing, ask the user before starting.
-6. Execute the steps in order. For each step that names an agent, invoke that agent via the Task tool with the inputs the sequence specifies. Report each agent's output to the user before moving on.
+6. Execute the steps in order. For each step that names an agent, invoke that agent via the Task tool with the inputs the sequence specifies. When invoking the Architect (gf_architect or evo_architect), pass the tech-decision mode in the prompt (`tech-decision mode: autonomous` or `tech-decision mode: user`). Report each agent's output to the user before moving on.
 7. Loop where the sequence says to loop (e.g., review + fix loop, gap-back loops).
 8. Stop at the **Done when** conditions. Confirm with the user that exit criteria are met.
 

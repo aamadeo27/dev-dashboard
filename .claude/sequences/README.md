@@ -20,7 +20,18 @@ Examples:
 /sequence refactor
 ```
 
-Aliases accepted: `task` → `task-feature`, `bug` → `bug-fix`, `kb` → `kb-curation`, `dep` → `dep-cve-patch`, `backfill` → `test-backfill`, `review` → `review-fix-loop`, `monitoring` → `monitoring-rollout`.
+Aliases accepted: `task` → `task-feature`, `epic` → `epic-execution`, `bug` → `bug-fix`, `kb` → `kb-curation`, `dep` → `dep-cve-patch`, `backfill` → `test-backfill`, `review` → `review-fix-loop`, `monitoring` → `monitoring-rollout`.
+
+### Tech-decision mode
+
+By default the Architect decides technical issues autonomously and documents them. If you want to be asked about technical decisions instead, append `user-decides-tech` (or `udt`):
+
+```
+/sequence pre-project user-decides-tech
+/sequence evolution udt
+```
+
+Business / product gaps (missing actions, business rules, roles, priorities) are always escalated to you regardless of mode.
 
 What happens:
 1. Claude resolves `<name>` to the right `sequences/<n>-<name>.md` file.
@@ -44,6 +55,7 @@ You can also run a sequence by hand without the slash command — just open the 
 | Spec is locked, time to scaffold | `02-bootstrap` |
 | Dev works, need to ship to real users | `03-prod-infra` |
 | Build a single feature / Task | `04-task-feature` |
+| Drive a whole Epic (many Tasks, parallel) | `13-epic-execution` |
 | New feature on an existing app | `05-evolution` |
 | Fix a reported bug | `06-bug-fix` |
 | KB feels messy or stale | `07-kb-curation` |
@@ -62,6 +74,8 @@ You can also run a sequence by hand without the slash command — just open the 
                   ↓                                                    ↓
         04-task-feature                                         05-evolution
         (per Task in initial backlog)                           (per change request)
+                  ↑                                                    │
+        13-epic-execution (drives many 04 runs in parallel) ←──────────┘
                   ↓                                                    ↓
                   └────────────────────  06-bug-fix  ──────────────────┘
                                               │
