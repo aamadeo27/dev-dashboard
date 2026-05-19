@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item *)",
+      "Bash(echo *)",
+      "Bash(pnpm *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(npm install *)",
+      "PowerShell(pnpm *)",
+      "PowerShell(pnpm create *)",
+      "PowerShell(Get-ChildItem *)"
+    ]
+  }
+}

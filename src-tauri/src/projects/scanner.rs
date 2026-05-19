@@ -1,0 +1,1 @@
+// ProjectScanner — discovers .claude/ subfolders

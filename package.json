@@ -1,0 +1,49 @@
+{
+  "name": "dev-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm tauri dev",
+    "dev:local": "cross-env DEV_DASHBOARD_LOG=debug DEV_DASHBOARD_CONFIG_DIR=.dev-data pnpm tauri dev",
+    "build": "pnpm tauri build",
+    "preview": "vite preview",
+    "lint": "biome check --write src/",
+    "lint:ci": "biome ci src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bindings": "cross-env TS_RS_EXPORT_DIR=../src/ipc/ cargo test --features export-bindings --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.11",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^9.0.3",
+    "react-router-dom": "^7.6.1",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "cross-env": "^7.0.3",
+    "diff2html": "^3.4.56",
+    "jsdom": "^26.1.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^3.2.1"
+  }
+}

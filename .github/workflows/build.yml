@@ -1,0 +1,115 @@
+# .github/workflows/build.yml
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.artifact }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x64
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # --- Rust toolchain ---
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@4305c38b25b97a56b7ead356f2a1d7d9ef993260 # stable (2024-11-01)
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2.7.5
+        with:
+          workspaces: src-tauri
+
+      # --- Node / pnpm ---
+      - name: Install pnpm
+        uses: pnpm/action-setup@a3252b01235470b1af1eecfd42a25700cb7f695e # v4.1.0
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --- Linux system deps for Tauri (WebKit) ---
+      - name: Install Tauri system deps (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      # --- Build ---
+      - name: Build Tauri app
+        run: pnpm tauri build
+        env:
+          # Disable code signing for personal-use builds
+          TAURI_PRIVATE_KEY: ""
+          TAURI_KEY_PASSWORD: ""
+
+      # --- Collect artifacts ---
+      # Linux:   .AppImage and .deb  → src-tauri/target/release/bundle/
+      # macOS:   .dmg                → src-tauri/target/release/bundle/dmg/
+      # Windows: .msi and .exe       → src-tauri/target/release/bundle/msi/ and /nsis/
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: dev-dashboard-${{ matrix.artifact }}-${{ github.ref_name }}
+          path: |
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444306234af6373af55a3b4e # v4.1.8
+        with:
+          path: artifacts/
+
+      - name: Create draft GitHub Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --draft \
+            --generate-notes \
+            --title "${{ github.ref_name }}" \
+            artifacts/**/*
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,84 @@
+@import "./tokens.css";
+
+/* ------------------------------------------------------------------ */
+/* Box-sizing reset                                                     */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* ------------------------------------------------------------------ */
+/* Base reset                                                           */
+/* ------------------------------------------------------------------ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ------------------------------------------------------------------ */
+/* Focus management                                                     */
+/* ------------------------------------------------------------------ */
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Monospace stack                                                      */
+/* ------------------------------------------------------------------ */
+
+code,
+pre,
+kbd {
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", "Consolas", "Menlo", monospace;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-code);
+}
+
+/* ------------------------------------------------------------------ */
+/* Scrollbar styling                                                    */
+/* ------------------------------------------------------------------ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
