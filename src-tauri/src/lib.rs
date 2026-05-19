@@ -3,11 +3,11 @@ pub(crate) mod error;
 pub mod ipc;
 pub(crate) mod logging;
 pub(crate) mod platform;
-pub(crate) mod projects;
-pub(crate) mod runs;
-pub(crate) mod sequences;
-pub(crate) mod settings;
-pub(crate) mod usage;
+pub mod projects;
+pub mod runs;
+pub mod sequences;
+pub mod settings;
+pub mod usage;
 
 use app_state::AppState;
 
@@ -45,6 +45,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ipc::commands::ping,
             ipc::commands::ping_error,
+            ipc::commands::log_frontend_error,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri application failed to start — check logs for initialization errors");

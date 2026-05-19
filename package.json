@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bindings": "cross-env TS_RS_EXPORT_DIR=../src/ipc/ cargo test --features export-bindings --manifest-path src-tauri/Cargo.toml"
+    "bindings": "cross-env TS_RS_EXPORT_DIR=../src/ipc/ cargo test --features export-bindings --manifest-path src-tauri/Cargo.toml",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.11",

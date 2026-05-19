@@ -33,7 +33,8 @@ All commands run from the repo root. Requires: `pnpm`, `cargo`/`rustup` with the
 | `pnpm typecheck` | `tsc --noEmit` | TypeScript type check without emit |
 | `pnpm test` | `vitest run` | Run all frontend unit tests once |
 | `pnpm test:watch` | `vitest` | Vitest in watch mode for local dev |
-| `pnpm bindings` | `cargo test --features export-bindings --manifest-path src-tauri/Cargo.toml` | Regenerate `src/ipc/bindings.ts` from Rust ts-rs derives |
+| `pnpm bindings` | `cross-env TS_RS_EXPORT_DIR=../src/ipc/ cargo test --features export-bindings --manifest-path src-tauri/Cargo.toml` | Regenerate `src/ipc/bindings.ts` from Rust ts-rs derives (`TS_RS_EXPORT_DIR` controls output path) |
+| `pnpm prepare` | `git config core.hooksPath .githooks \|\| true` | Activate pre-commit hooks (run once after clone) |
 
 ### Cargo commands (run from `src-tauri/` or root with `--manifest-path`)
 
@@ -48,6 +49,10 @@ All commands run from the repo root. Requires: `pnpm`, `cargo`/`rustup` with the
 ### Checking bindings are up to date
 
 Run `pnpm bindings` then `git diff --exit-code src/ipc/bindings.ts`. A non-zero exit means the bindings are stale. CI gates on this check.
+
+### Pre-commit hooks
+
+Run `pnpm prepare` once after cloning to activate the hooks in `.githooks/`. The pre-commit hook runs `pnpm lint:ci` and `pnpm typecheck`. Bindings freshness requires cargo and is checked in CI only.
 
 ---
 

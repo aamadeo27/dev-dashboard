@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-commit quality gate. Runs fast frontend checks only.
+# Bindings freshness (pnpm bindings) requires cargo and is enforced by CI instead.
+
+set -e
+
+echo "pre-commit: running lint and typecheck..."
+pnpm lint:ci
+pnpm typecheck
+echo "pre-commit: OK"
