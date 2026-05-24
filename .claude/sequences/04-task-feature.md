@@ -7,9 +7,12 @@ Goal: implement one Task from the backlog end-to-end.
 - Bootstrap is done, prod infra ideally also done.
 
 ## Inputs
-- The Task (acceptance criteria, contracts, dependencies)
-- Knowledge Base
-- UI/UX spec (for frontend tasks)
+- The Task id (e.g. `T2.5`, `2.5`, or `002.T05`). The orchestrator resolves it to a Task entry inside `docs/epics/<epic-id>-<slug>.md`.
+- The Task entry itself: acceptance criteria, contracts, dependencies.
+- Knowledge Base.
+- UI/UX spec (for frontend tasks).
+
+If no Task id was given → read `docs/epics/` and list pending Tasks (status not done) across all in-progress Epics; ask the user which one to run.
 
 ## Steps
 

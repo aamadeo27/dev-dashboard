@@ -8,6 +8,10 @@ You are the orchestrator for a process sequence.
 ## What to do
 
 1. Take the argument: `$ARGUMENTS`. If the user appended `user-decides-tech` (or `udt`) as an extra token, set the **tech-decision mode** to `user`. Otherwise default to `autonomous` (Architect decides technical issues).
+   - **Task-id argument**: for sequences that operate on a specific Task (`task-feature`) or Epic (`epic-execution`), an extra token may be the id:
+     - **Task id** examples: `T2.5`, `2.5`, `002.T05`. Resolve by scanning `docs/epics/*.md` for a Task matching the id (any format), then pass the resolved Task to the sequence.
+     - **Epic id** examples: `2`, `002`, `002-auth`. Resolve via `docs/epics/README.md`.
+   - If a sequence needs an id but none was given → read the index, list options, and ask.
 2. Find the matching file in `.claude/sequences/`. Match by suffix, ignoring leading digits and the `.md` extension.
    - `pre-project`        → `.claude/sequences/01-pre-project.md`
    - `bootstrap`          → `.claude/sequences/02-bootstrap.md`
@@ -45,6 +49,23 @@ Subagents do not share live context; each one re-reads from disk. Sloppy prompts
 2. **Pre-stage a diff file.** Before any review pass that follows a code change, dump the diff to `docs/tasks/<task-id>-diff-<iter>.patch` (use `git diff` against the base commit). Pass that path to every reviewer. They Read the patch first; the patch is much smaller than the full files.
 3. **Reference the KB index, never dump KB content.** Orchestrator and agents pass paths into KB sub-docs; never inline the index or sub-doc content.
 4. **No "explore the repo" prompts.** Never instruct an agent to "look around" or "find relevant files." If you can't name a path or path list, pause and resolve it yourself before invoking.
+
+## Single-Task branch lifecycle (no worktree)
+
+For `/sequence task <id>` (and other sequences that work on one Task at a time: `bug-fix`, `dep-cve-patch`, `refactor`), the orchestrator creates a branch in the **main repo** — no worktree needed because there's no parallelism. Apply the same merge + conflict-resolution rules as the worktree flow, minus the worktree create/remove steps.
+
+1. **Before invoking the coder**: create a branch off the current integration/default branch per the DevOps KB convention:
+   ```
+   git checkout -b <type>/<task-id>-<slug>
+   ```
+2. **Invoke agents** in the main repo (no `worktree=` input; agents use default `DevTeam.log` at project root).
+3. **After review-fix loop is clean**:
+   - Switch back to the integration/default branch.
+   - Merge the Task branch (`git merge --no-ff <type>/<task-id>-<slug>`).
+   - Apply the **Conflict resolution** rules below (same as worktree flow).
+4. **Optional cleanup**: delete the merged branch (`git branch -d ...`) unless the DevOps plan keeps Task branches.
+
+If the working tree is dirty when this sequence starts → refuse to proceed; ask the user to commit or stash.
 
 ## Worktree management (parallel Tasks)
 

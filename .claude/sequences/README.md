@@ -14,7 +14,13 @@ Examples:
 
 ```
 /sequence pre-project
-/sequence task
+/sequence task                 # list pending Tasks across Epics, ask which
+/sequence task T2.5            # run task-feature for Task T2.5
+/sequence task 2.5             # same — short form
+/sequence task 002.T05         # same — formal form
+/sequence epic                 # list Epics, ask which
+/sequence epic 002             # run epic-execution for Epic 002
+/sequence epic 002-auth        # same
 /sequence bug-fix
 /sequence evolution
 /sequence refactor
