@@ -18,8 +18,10 @@ export const GIT_UPDATED = "git:updated" as const;
  *  Backend counterpart: `RUN_STARTED` in src-tauri/src/ipc/events.rs. */
 export const RUN_STARTED = "run:started" as const;
 
-/** Emitted for each structured event parsed from the child's stdout.
- *  Payload shape: `{ run_id: string, event: RunEvent }`.
+/** Emitted once per `read()` call with all structured events parsed from that
+ *  chunk of the child's stdout (batched to reduce IPC overhead).
+ *  Payload shape: `{ run_id: string, events: RunEvent[] }`.
+ *  For UserInput events the array always contains exactly one element.
  *  Backend counterpart: `RUN_EVENT` in src-tauri/src/ipc/events.rs. */
 export const RUN_EVENT = "run:event" as const;
 

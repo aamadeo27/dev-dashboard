@@ -18,6 +18,25 @@ use super::{Run, RunStatus};
 use super::manager::SessionHandle;
 
 // ---------------------------------------------------------------------------
+// RunIoContext — bundles all per-run parameters for run_io_loop
+// ---------------------------------------------------------------------------
+
+/// All context needed by the background I/O loop for a single run.
+///
+/// Grouping these into a struct keeps `run_io_loop`'s signature short and
+/// makes the call site in `commands.rs` self-documenting.
+pub(crate) struct RunIoContext {
+    pub(crate) run: Arc<Mutex<Run>>,
+    pub(crate) stdout: tokio::process::ChildStdout,
+    pub(crate) stderr: tokio::process::ChildStderr,
+    pub(crate) child: tokio::process::Child,
+    pub(crate) writer: TranscriptWriter,
+    pub(crate) cancel: CancellationToken,
+    pub(crate) sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
+    pub(crate) input_rx: tokio::sync::mpsc::Receiver<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Public helpers (also used by launch_run command)
 // ---------------------------------------------------------------------------
 
@@ -101,6 +120,38 @@ pub async fn verify_run_dir_prefix(project_path: &Path, run_dir: &Path) -> AppRe
 }
 
 // ---------------------------------------------------------------------------
+// Background I/O helpers
+// ---------------------------------------------------------------------------
+
+/// Append a raw stdout/stderr chunk, parse it for structured events, write all
+/// parsed events to the transcript in one batch, and emit a single `run:event`
+/// payload to the frontend.
+///
+/// Called from both the main select! loop and the post-cancel drain block so
+/// that the identical processing logic is not duplicated.
+async fn process_stdout_chunk(
+    chunk: &[u8],
+    run_id: &str,
+    writer: &mut TranscriptWriter,
+    parser: &mut EventParser,
+    app_handle: &tauri::AppHandle,
+) {
+    if let Err(e) = writer.append_raw(chunk).await {
+        tracing::warn!(run_id = %run_id, error = %e, "append_raw stdout failed");
+    }
+    let events_parsed = parser.feed(chunk);
+    if let Err(e) = writer.append_events(&events_parsed).await {
+        tracing::warn!(run_id = %run_id, error = %e, "append_events failed");
+    }
+    if !events_parsed.is_empty() {
+        let payload = serde_json::json!({ "run_id": run_id, "events": events_parsed });
+        if let Err(e) = app_handle.emit(events::RUN_EVENT, payload) {
+            tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:event");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Background I/O loop
 // ---------------------------------------------------------------------------
 
@@ -112,21 +163,21 @@ pub async fn verify_run_dir_prefix(project_path: &Path, run_dir: &Path) -> AppRe
 /// 4. On cancellation, kills the child.
 /// 5. After the child exits, finalises the run status and emits `run:finished`.
 /// 6. Removes the session from the `sessions` map.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_io_loop(
-    app_handle: tauri::AppHandle,
-    run_id: String,
-    run: Arc<Mutex<Run>>,
-    mut stdout: tokio::process::ChildStdout,
-    mut stderr: tokio::process::ChildStderr,
-    mut child: tokio::process::Child,
-    mut writer: TranscriptWriter,
-    cancel: CancellationToken,
-    sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
-    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
-) {
-    let span = tracing::info_span!("run_session", run_id = %run_id);
-    let _enter = span.enter();
+///
+/// The span is instrumented at the `tokio::task::spawn` call site in
+/// `commands.rs` via `.instrument(span)` so that the async-aware
+/// tracing span is entered/exited correctly across await points.
+pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunIoContext) {
+    let RunIoContext {
+        run,
+        mut stdout,
+        mut stderr,
+        mut child,
+        mut writer,
+        cancel,
+        sessions,
+        mut input_rx,
+    } = ctx;
 
     // ── Step 1: mark Running, write meta, emit run:started ──────────────────
 
@@ -177,21 +228,8 @@ pub async fn run_io_loop(
                     }
                     Ok(n) => {
                         let chunk = &stdout_buf[..n];
-                        // Append to raw log.
-                        if let Err(e) = writer.append_raw(chunk).await {
-                            tracing::warn!(run_id = %run_id, error = %e, "append_raw stdout failed");
-                        }
-                        // Feed to parser, emit events.
-                        let events_parsed = parser.feed(chunk);
-                        for event in &events_parsed {
-                            if let Err(e) = writer.append_event(event).await {
-                                tracing::warn!(run_id = %run_id, error = %e, "append_event failed");
-                            }
-                            let payload = serde_json::json!({ "run_id": run_id, "event": event });
-                            if let Err(e) = app_handle.emit(events::RUN_EVENT, payload) {
-                                tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:event");
-                            }
-                        }
+                        // Batch raw append + parse + transcript write + emit.
+                        process_stdout_chunk(chunk, &run_id, &mut writer, &mut parser, &app_handle).await;
                     }
                     Err(e) => {
                         tracing::warn!(run_id = %run_id, error = %e, "stdout read error");
@@ -219,6 +257,7 @@ pub async fn run_io_loop(
             }
 
             // UserInput channel — write to transcript and emit run:event.
+            // Not in the hot path so we emit immediately (single-event array).
             maybe_text = input_rx.recv() => {
                 if let Some(text) = maybe_text {
                     let event = super::RunEvent::UserInput {
@@ -228,7 +267,7 @@ pub async fn run_io_loop(
                     if let Err(e) = writer.append_event(&event).await {
                         tracing::warn!(run_id = %run_id, error = %e, "append_event UserInput failed");
                     }
-                    let payload = serde_json::json!({ "run_id": run_id, "event": event });
+                    let payload = serde_json::json!({ "run_id": run_id, "events": [event] });
                     if let Err(e) = app_handle.emit(events::RUN_EVENT, payload) {
                         tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:event UserInput");
                     }
@@ -250,36 +289,34 @@ pub async fn run_io_loop(
     // ── Step 3: drain remaining output (best-effort, with short timeout) ────
     // Always drain regardless of cancellation: the child may flush final output
     // after kill() before the pipe closes.  The 200 ms timeout bounds this.
+    // stdout and stderr are interleaved via tokio::select! so neither stream
+    // can starve the other within the shared budget.
 
     let drain_timeout = std::time::Duration::from_millis(200);
+    let mut stdout_done = false;
+    let mut stderr_done = false;
 
-    // Drain stdout.
     let _ = tokio::time::timeout(drain_timeout, async {
         loop {
-            match stdout.read(&mut stdout_buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let chunk = &stdout_buf[..n];
-                    let _ = writer.append_raw(chunk).await;
-                    let events_parsed = parser.feed(chunk);
-                    for event in &events_parsed {
-                        let _ = writer.append_event(event).await;
-                        let payload = serde_json::json!({ "run_id": run_id, "event": event });
-                        let _ = app_handle.emit(events::RUN_EVENT, payload);
+            if stdout_done && stderr_done {
+                break;
+            }
+            tokio::select! {
+                result = stdout.read(&mut stdout_buf), if !stdout_done => {
+                    match result {
+                        Ok(0) | Err(_) => stdout_done = true,
+                        Ok(n) => {
+                            process_stdout_chunk(&stdout_buf[..n], &run_id, &mut writer, &mut parser, &app_handle).await;
+                        }
                     }
                 }
-            }
-        }
-    })
-    .await;
-
-    // Drain stderr.
-    let _ = tokio::time::timeout(drain_timeout, async {
-        loop {
-            match stderr.read(&mut stderr_buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let _ = writer.append_raw(&stderr_buf[..n]).await;
+                result = stderr.read(&mut stderr_buf), if !stderr_done => {
+                    match result {
+                        Ok(0) | Err(_) => stderr_done = true,
+                        Ok(n) => {
+                            let _ = writer.append_raw(&stderr_buf[..n]).await;
+                        }
+                    }
                 }
             }
         }
@@ -579,7 +616,7 @@ mod tests {
     }
 
     /// A `run_dir` containing `../..` that escapes the project must be rejected
-    /// even though the string contains the runs prefix as a substring (FIX-SEC-7).
+    /// even though the string contains the runs prefix as a substring.
     ///
     /// The path `<project>/.claude/runs/../../outside` resolves to
     /// `<project>/outside` after lexical normalisation — clearly outside the

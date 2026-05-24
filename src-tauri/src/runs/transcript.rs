@@ -57,12 +57,28 @@ impl TranscriptWriter {
     }
 
     /// Serialize `event` as compact JSON followed by `\n`, write to
-    /// `transcript.jsonl`. Durability is guaranteed by `close()`.
+    /// `transcript.jsonl`, and flush immediately so the event is durable
+    /// even if the process crashes before `close()` is called.
     pub async fn append_event(&mut self, event: &RunEvent) -> AppResult<()> {
         let mut line = serde_json::to_string(event)
             .map_err(|e| AppError::Parse(e.to_string()))?;
         line.push('\n');
         self.transcript.write_all(line.as_bytes()).await?;
+        self.transcript.flush().await?;
+        Ok(())
+    }
+
+    /// Serialize all events in `events` as JSONL lines in a single pass, then
+    /// flush once.  Prefer this over calling `append_event` in a loop from the
+    /// caller — it avoids repeated flush calls and keeps the write path batched.
+    pub async fn append_events(&mut self, events: &[RunEvent]) -> AppResult<()> {
+        for event in events {
+            let mut line = serde_json::to_string(event)
+                .map_err(|e| AppError::Parse(e.to_string()))?;
+            line.push('\n');
+            self.transcript.write_all(line.as_bytes()).await?;
+        }
+        self.transcript.flush().await?;
         Ok(())
     }
 
@@ -813,5 +829,72 @@ mod tests {
                 line
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 17: append_events writes all events in a single batch; each line
+    //          parses independently and order is preserved (FIX-ML-1)
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn append_events_batch_writes_all_events_in_order() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let run_dir = tmp.path().join("run-17");
+
+        let run = make_run("run-17");
+        let mut writer = TranscriptWriter::create("run-17", &run_dir, &run)
+            .await
+            .expect("create");
+
+        let events: Vec<RunEvent> = vec![
+            make_event("first"),
+            make_event("second"),
+            make_event("third"),
+        ];
+        writer.append_events(&events).await.expect("append_events");
+        writer.close().await.expect("close");
+
+        let contents = std::fs::read_to_string(run_dir.join("transcript.jsonl"))
+            .expect("read transcript.jsonl");
+
+        let lines: Vec<&str> = contents.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 3, "must have exactly 3 lines");
+
+        // Each line must parse as an AssistantText event with the correct text.
+        let expected_texts = ["first", "second", "third"];
+        for (i, (line, expected_text)) in lines.iter().zip(expected_texts.iter()).enumerate() {
+            let parsed: RunEvent =
+                serde_json::from_str(line).unwrap_or_else(|e| panic!("line {} failed to parse: {}", i, e));
+            if let RunEvent::AssistantText { text, .. } = parsed {
+                assert_eq!(
+                    text, *expected_text,
+                    "line {} text must match; expected {:?}, got {:?}",
+                    i, expected_text, text
+                );
+            } else {
+                panic!("expected AssistantText at line {}", i);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 18: append_events with an empty slice is a no-op — transcript
+    //          remains empty and no error is returned (FIX-ML-1)
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn append_events_empty_slice_is_no_op() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let run_dir = tmp.path().join("run-18");
+
+        let run = make_run("run-18");
+        let mut writer = TranscriptWriter::create("run-18", &run_dir, &run)
+            .await
+            .expect("create");
+
+        // Call append_events with an empty slice — must not error.
+        writer.append_events(&[]).await.expect("append_events empty slice must not error");
+        writer.close().await.expect("close");
+
+        let bytes = std::fs::read(run_dir.join("transcript.jsonl")).expect("read transcript.jsonl");
+        assert!(bytes.is_empty(), "transcript.jsonl must be empty after appending zero events");
     }
 }

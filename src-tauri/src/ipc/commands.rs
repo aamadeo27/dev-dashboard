@@ -2,14 +2,17 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use chrono::Utc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::projects::Project;
 use crate::runs::manager::SessionHandle;
-use crate::runs::session::{build_run_dir, validate_run_id, verify_run_dir_prefix};
+use crate::runs::session::{build_run_dir, validate_run_id, verify_run_dir_prefix, RunIoContext};
 use crate::runs::transcript::TranscriptWriter;
 use crate::runs::{LaunchInput, Run, RunStatus};
 use crate::sequences::Sequence;
@@ -411,10 +414,6 @@ pub async fn scan_project(
 }
 
 // ---------------------------------------------------------------------------
-// Platform open commands (T2.8)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Git poller commands (T2.3)
 // ---------------------------------------------------------------------------
 
@@ -697,7 +696,7 @@ pub async fn launch_run(
     // ── 8. Build session handle and register ──────────────────────────────────
     let cancel_token = CancellationToken::new();
     let run_arc = Arc::new(Mutex::new(initial_run.clone()));
-    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (input_tx, input_rx) = tokio::sync::mpsc::channel::<String>(32);
     let handle = Arc::new(SessionHandle {
         cancel: cancel_token.clone(),
         stdin: Arc::new(Mutex::new(child_stdin)),
@@ -705,10 +704,7 @@ pub async fn launch_run(
         input_tx,
     });
 
-    let sessions = {
-        let rm = state.run_manager.lock().await;
-        rm.sessions.clone()
-    };
+    let sessions = state.run_manager.lock().await.sessions_arc();
 
     // ── 9. Insert handle into sessions map, then spawn background I/O task ───
     // Insert BEFORE spawn so that run_io_loop's map.remove (Step 8) can never
@@ -722,18 +718,22 @@ pub async fn launch_run(
         map.insert(run_id.clone(), handle);
     }
 
-    let _ = tokio::task::spawn(crate::runs::session::run_io_loop(
-        app_handle,
-        run_id.clone(),
-        run_arc,
-        child_stdout,
-        child_stderr,
+    // Instrument the spawned future at the call site so the
+    // async-aware span is entered/exited correctly across await points.
+    let span = tracing::info_span!("run_session", run_id = %run_id);
+    let ctx = RunIoContext {
+        run: run_arc,
+        stdout: child_stdout,
+        stderr: child_stderr,
         child,
         writer,
-        cancel_token,
-        sessions.clone(),
+        cancel: cancel_token,
+        sessions: sessions.clone(),
         input_rx,
-    ));
+    };
+    let _ = tokio::task::spawn(
+        crate::runs::session::run_io_loop(app_handle, run_id.clone(), ctx).instrument(span),
+    );
 
     tracing::info!(
         run_id = %run_id,
@@ -756,10 +756,7 @@ pub async fn stop_run(
     run_id: String,
     state: tauri::State<'_, AppState>,
 ) -> AppResult<()> {
-    let sessions = {
-        let rm = state.run_manager.lock().await;
-        rm.sessions.clone()
-    };
+    let sessions = state.run_manager.lock().await.sessions_arc();
 
     let handle = {
         let map = sessions.lock().await;
@@ -787,10 +784,7 @@ pub async fn send_input(
     text: String,
     state: tauri::State<'_, AppState>,
 ) -> AppResult<()> {
-    let sessions = {
-        let rm = state.run_manager.lock().await;
-        rm.sessions.clone()
-    };
+    let sessions = state.run_manager.lock().await.sessions_arc();
 
     let handle = {
         let map = sessions.lock().await;
@@ -802,7 +796,7 @@ pub async fn send_input(
         Some(h) => h,
     };
 
-    // FIX-SEC-2: cap input size to prevent unbounded writes to child stdin.
+    // Cap input size to prevent unbounded writes to child stdin.
     const MAX_INPUT_BYTES: usize = 65_536; // 64 KiB
     if text.len() > MAX_INPUT_BYTES {
         return Err(AppError::InvalidInput(format!(
@@ -812,35 +806,45 @@ pub async fn send_input(
         )));
     }
 
-    // Send to the UserInput transcript channel.  If the channel is closed
-    // (I/O loop already exited), the run is no longer accepting input.
-    if handle.input_tx.send(text.clone()).is_err() {
-        return Err(AppError::InvalidInput(
-            "run is not accepting input".to_string(),
-        ));
-    }
-
-    let mut stdin_guard = handle.stdin.lock().await;
-    match stdin_guard.as_mut() {
-        None => Err(AppError::InvalidInput(
-            "run is not accepting input".to_string(),
-        )),
-        Some(stdin) => {
-            use tokio::io::AsyncWriteExt;
-            stdin.write_all(text.as_bytes()).await.map_err(AppError::Io)?;
-            stdin.write_all(b"\n").await.map_err(AppError::Io)?;
-            tracing::debug!(run_id = %run_id, text_len = text.len(), "send_input: wrote to stdin");
-            Ok(())
+    // Write to child stdin first (borrow text).  If stdin write fails, the
+    // UserInput channel send is skipped — we do not record input that was not
+    // actually delivered.
+    {
+        let mut stdin_guard = handle.stdin.lock().await;
+        match stdin_guard.as_mut() {
+            None => {
+                return Err(AppError::InvalidInput(
+                    "run is not accepting input".to_string(),
+                ));
+            }
+            Some(stdin) => {
+                stdin.write_all(text.as_bytes()).await.map_err(AppError::Io)?;
+                stdin.write_all(b"\n").await.map_err(AppError::Io)?;
+                tracing::debug!(run_id = %run_id, text_len = text.len(), "send_input: wrote to stdin");
+            }
         }
     }
+
+    // Move text into the UserInput channel for transcript recording.
+    handle.input_tx.try_send(text).map_err(|e| match e {
+        TrySendError::Full(_) => AppError::InvalidInput(
+            "run input queue full — try again shortly".to_string(),
+        ),
+        TrySendError::Closed(_) => AppError::InvalidInput(
+            "run is not accepting input".to_string(),
+        ),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use crate::runs::manager::SessionHandle;
+    use tokio_util::sync::CancellationToken;
 
     // -----------------------------------------------------------------------
-    // FIX-SEC-1 — is_valid_sequence_name
+    // is_valid_sequence_name
     // -----------------------------------------------------------------------
 
     /// Empty string must be rejected.
@@ -881,7 +885,7 @@ mod tests {
         assert!(is_valid_sequence_name("foo.bar"), "dot in name must be accepted");
     }
 
-    /// Names containing `..` path components must be rejected (FIX-SEC-6).
+    /// Names containing `..` path components must be rejected.
     #[test]
     fn is_valid_sequence_name_rejects_dotdot_segments() {
         assert!(!is_valid_sequence_name("../../etc/passwd"), "double-dot traversal must be rejected");
@@ -900,7 +904,7 @@ mod tests {
         assert!(!is_valid_sequence_name("foo/"), "trailing slash must be rejected");
     }
 
-    /// Names starting with `/` must be rejected as absolute paths (FIX-SEC-6).
+    /// Names starting with `/` must be rejected as absolute paths.
     #[test]
     fn is_valid_sequence_name_rejects_absolute_path() {
         assert!(!is_valid_sequence_name("/absolute"), "leading slash must be rejected");
@@ -908,7 +912,7 @@ mod tests {
         assert!(!is_valid_sequence_name("/"), "bare slash must be rejected");
     }
 
-    /// Names longer than 256 characters must be rejected (FIX-SEC-6).
+    /// Names longer than 256 characters must be rejected.
     #[test]
     fn is_valid_sequence_name_rejects_over_256_chars() {
         let exactly_256 = "a".repeat(256);
@@ -924,7 +928,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // FIX-SEC-2 — send_input 64 KiB cap (guard predicate)
+    // send_input 64 KiB cap (guard predicate)
     // -----------------------------------------------------------------------
 
     /// Exactly 64 KiB must be accepted.
@@ -1138,10 +1142,6 @@ mod tests {
     /// holds, then call the lookup logic from `stop_run`.
     #[tokio::test]
     async fn stop_run_returns_error_for_unknown_run_id() {
-        use std::collections::HashMap;
-        use crate::runs::manager::SessionHandle;
-        use tokio_util::sync::CancellationToken;
-
         // Build an empty sessions map (no active runs).
         let sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>> =
             std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
@@ -1170,9 +1170,6 @@ mod tests {
     /// Simulate the send_input lookup logic with an empty sessions map.
     #[tokio::test]
     async fn send_input_returns_error_for_unknown_run_id() {
-        use std::collections::HashMap;
-        use crate::runs::manager::SessionHandle;
-
         // Build an empty sessions map (no active runs).
         let sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>> =
             std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));

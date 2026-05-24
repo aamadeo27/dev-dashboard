@@ -20,7 +20,7 @@ pub struct SessionHandle {
     pub run: Arc<Mutex<Run>>,
     /// Sender half of the UserInput channel.  `send_input` pushes text here so
     /// the I/O loop can write a `UserInput` event to the transcript.
-    pub input_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    pub input_tx: tokio::sync::mpsc::Sender<String>,
 }
 
 /// Manages all active `RunSession` background tasks.
@@ -40,5 +40,12 @@ impl RunManager {
 
     pub fn new_arc() -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self::new()))
+    }
+
+    /// Return a clone of the sessions `Arc` without holding a lock on
+    /// `RunManager` itself.  Callers can lock the sessions map directly,
+    /// releasing the `RunManager` lock immediately (FIX-PQ-3).
+    pub fn sessions_arc(&self) -> Arc<Mutex<HashMap<String, Arc<SessionHandle>>>> {
+        self.sessions.clone()
     }
 }
