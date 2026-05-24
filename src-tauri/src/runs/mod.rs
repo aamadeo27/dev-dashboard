@@ -5,6 +5,8 @@ pub(crate) mod parser;
 pub(crate) mod transcript;
 pub(crate) mod orphan;
 pub(crate) mod retention;
+pub mod manager;
+pub use manager::RunManager;
 
 /// Lifecycle state of a run; serializes as the variant name (`"Pending"`, `"Running"`, …).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
