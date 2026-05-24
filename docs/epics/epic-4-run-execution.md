@@ -71,11 +71,15 @@ The heart. Unblocks live and historical run views.
 
 ### T4.7 [backend] respond_to_step_failure command + step-failure detection
 
-- **Description**: Parser emits `StepFailed` event on detecting a step failure marker (markers per CLI integration — Coder pins during T4.1). `RunSession` also emits `run:step_failure`. `respond_to_step_failure(run_id, choice)` writes the appropriate token to stdin. A 60s timer auto-Continues if no response.
+- **Description**: Parser emits `StepFailed` event on detecting a step failure marker (markers per CLI integration — Coder pins during T4.1). `RunSession` also emits `run:step_failure`. `respond_to_step_failure(run_id, choice)` handles the choice per the kill + re-invoke protocol resolved in T4.8. A 60s timer auto-Continues if no response.
 - **Acceptance**:
-  - Mock CLI that emits a step-failure marker triggers the event.
-  - Each of the four choices is dispatched per the protocol resolved in T4.8 (either via stdin token or via kill + re-invoke).
-  - No response within 60s -> Continue is auto-sent and logged.
+  - Mock CLI that emits a step-failure marker triggers the `StepFailed` event and the `run:step_failure` push event.
+  - **Continue**: write `"\n"` to stdin; if the child does not produce new output within 2 s, kill + re-invoke with the original prompt. Auto-triggered after 60 s with an `info` log.
+  - **Retry**: kill child (`child.kill()`), re-invoke Claude CLI with the same `LaunchInput`. New `run_id` is minted and linked to the original run in `meta.json` as `retry_of: <original_run_id>`.
+  - **Skip**: kill child, re-invoke with prompt prefixed `"Skip the previous failing step and continue."` + original prompt text.
+  - **Abort**: kill child, mark run `RunStatus::Failed` with `exit_note = "Aborted by user"`. No re-invoke.
+  - No response within 60 s → Continue is auto-triggered and logged at `info` level.
+  - Protocol source: KB §9 item 3 (T4.8 resolution — option b, kill + re-invoke).
 - **Dependencies**: T4.3, T4.8.
 
 ---
