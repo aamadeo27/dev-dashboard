@@ -47,6 +47,16 @@ Run `/sequence` with no name to get the list of available sequences.
 
 You can also run a sequence by hand without the slash command — just open the file and invoke each agent yourself in the order listed. The slash command is sugar.
 
+## Activity log
+
+Every agent and the orchestrator append to `DevTeam.log` at the project root. Format:
+
+```
+[<ISO-8601 UTC timestamp>] [<agent-name>] [<short title>] <one-line description>
+```
+
+Use it to scan what the team did across a session: who acted, when, what they produced or surfaced. Tail it with `tail -f DevTeam.log` during a long run.
+
 ## Quick map
 
 | Situation | Sequence |

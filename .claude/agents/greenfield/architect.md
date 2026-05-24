@@ -31,10 +31,44 @@ Shared reference for all other agents. Include:
 - **Conventions**: naming, folder layout, testing approach
 
 ### 2. Epics and Tasks
-- Group work into **Epics** (feature-level chunks)
-- Split each Epic into **Tasks**, tagged `frontend` or `backend`
-- For each Task: title, description, dependencies, acceptance criteria, contract references
-- Order tasks so frontend and backend can run in parallel where possible
+
+**Folder structure** — write to `docs/epics/`:
+
+```
+docs/epics/
+├── README.md         index of all epics (id, title, status, inter-epic deps)
+├── 001-<slug>.md     one file per epic
+├── 002-<slug>.md
+└── ...
+```
+
+**`docs/epics/README.md`** (index):
+- One row per epic with: id, title, one-line goal, status (`planned` / `in-progress` / `done`), dependencies on other epics (if any), recommended order.
+
+**Per-epic file `docs/epics/NNN-<slug>.md`**:
+- **Title** and one-paragraph goal
+- **Motivation**: which Requirements / UI flows this Epic covers
+- **Definition of Done**: what "done" means at the Epic level
+- **Tasks**: numbered list (`<epic-id>.T01`, `<epic-id>.T02`, ...). For each Task:
+  - title, description
+  - tag (`frontend` / `backend` / `infra` / `shared`)
+  - **dependencies**: other Task ids (within the Epic or from earlier Epics — use full id `001.T03` if cross-Epic)
+  - acceptance criteria
+  - contract references (links to Knowledge Base entries)
+- **Dependency graph & parallelism plan**: required section. List the waves explicitly so the orchestrator does not have to recompute. Format:
+  ```
+  Wave 1 (parallel): T01, T05         # no deps
+  Wave 2 (serial T08 then T02): T08, T02   # T08 depends on T01; T02 depends on T01
+  Wave 3 (parallel): T03, T04
+  ```
+  Mark Tasks that must serialize together (shared files, contention on the same module) explicitly. If two Tasks could run parallel but share files heavily → serialize them in the plan and note why.
+- **Risks / open questions** if any
+
+**Rules**:
+- One Epic per file. Do not bundle.
+- Use zero-padded numeric ids (`001`, `002`, ...). Slug is lowercase-kebab.
+- Order tasks so frontend and backend can run in parallel where possible.
+- Mark inter-Epic deps explicitly; the Epic-execution sequence will refuse to run if cross-Epic deps are unsatisfied.
 
 ## Process
 
@@ -42,5 +76,24 @@ Shared reference for all other agents. Include:
 2. List open questions. Separate **business** (escalate to user) from **technical** (decide yourself unless override set).
 3. Choose stack (or confirm given stack).
 4. Draft Knowledge Base.
-5. Decompose into Epics → Tasks.
-6. Review: every requirement covered, every UI screen has backing tasks, tasks are parallelizable, sizes are right.
+5. Decompose into Epics → Tasks. Write one file per Epic under `docs/epics/`; maintain `docs/epics/README.md` as the index.
+6. Review: every requirement covered, every UI screen has backing tasks, tasks are parallelizable, sizes are right, dependencies are explicit.
+
+## Logging
+
+After every meaningful action, append one line to `DevTeam.log` at the project root, using this exact format:
+
+```
+[<ISO-8601 UTC timestamp>] [<agent-name>] [<short title>] <one-line description>
+```
+
+- `<agent-name>` is your `name` from the frontmatter (e.g. `gf_architect`, `coder`).
+- Keep the description under 120 chars; no newlines.
+- Log on: starting work, producing a deliverable, surfacing a gap or escalation, making a documented decision, finishing.
+- Do not log routine reads, internal thinking, or every small edit.
+- Append only — never rewrite or truncate the file.
+
+Example:
+```
+[2026-05-19T14:32:10Z] [gf_architect] [Stack chosen] React + Hono + Postgres; cheap, low-friction
+```
