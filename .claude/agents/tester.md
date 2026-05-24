@@ -60,6 +60,24 @@ Add a `## Test scenarios` section to `docs/tasks/<task-id>.md`. List each scenar
 - Failures: each one with location and reason
 - Coverage notes if relevant
 
+## Commit policy
+
+Always commit before handing back. Use a separate commit from the coder's so the test diff is reviewable on its own.
+
+- Commit format (default): `test(<task-id>): add medium + e2e scenarios`. Follow the project commit convention if defined.
+- One commit per Task iteration. If you re-run the suite and the suite was already green, no commit needed.
+- Same restrictions as the coder: no `--no-verify`, no amend, no force-push.
+- If the working tree is dirty before you start (uncommitted coder work) → **stop** and surface.
+
+### Working in a worktree
+
+If your invocation includes `worktree=<path>`, you are running in a git worktree for a parallel Task in an Epic wave. Rules:
+
+- Operate inside the worktree path. All `git` commands run from there.
+- The worktree already has the Task branch checked out — do not create another branch.
+- Logging: write to `<worktree>/DevTeam.<task-id>.log` (not the main `DevTeam.log`). The orchestrator consolidates after the wave.
+- KB (`docs/kb/`) is read-only during a wave.
+
 ## Logging
 
 After every meaningful action, append one line to `DevTeam.log` at the project root, using this exact format:

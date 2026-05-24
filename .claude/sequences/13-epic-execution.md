@@ -24,15 +24,16 @@ If the Epic argument is missing or ambiguous → read `docs/epics/README.md`, sh
 4. **Read the dependency graph & parallelism plan from the Epic file**. Do not recompute.
    - If the section is missing or incomplete → invoke the Architect to add it, then resume. Do not guess.
 5. **Wave 1**: read the first wave from the plan.
-6. **Run in parallel**: for each Task in the current wave, run `04-task-feature.md` as a subroutine. Invoke task-feature runs concurrently — they share the KB but operate on independent Tasks.
+6. **Run in parallel**: if the wave has >1 Task, set up **one git worktree per Task** per `commands/sequence.md` → "Worktree management". Each Task runs `04-task-feature.md` as a subroutine inside its own worktree on its own branch. For single-Task waves, skip worktrees and run directly in the main repo.
 7. Wait for the wave to finish.
-8. If any Task failed, was blocked, or surfaced an upstream decision → pause and ask the user how to proceed (fix, skip, restructure deps, escalate to evolution).
-9. Mark completed Tasks. Identify the next wave (Tasks whose deps are now satisfied). Repeat 6–8 until every Task is done.
-10. **Integration check**: run the full test suite (unit + medium + e2e) against the combined result of all Tasks in the Epic. If failures emerge only when Tasks are combined → fix in scope or surface as a new Task.
-11. **Review + fix loop** on the integrated change (`11-review-fix-loop.md`).
-12. Update `docs/epics/README.md`: set this Epic's status to `done`.
-13. **kb-curator** → mandatory **pattern-extraction pass** (see `agents/kb-curator.md` → Pattern extraction): scan reviewer findings across this Epic's Tasks, add recurring issues to `docs/kb/common-pitfalls.md`. Optional follow-on: consolidate per-Task docs and prune duplicates.
-14. **Completion announcement** — must always happen, even after a partial / aborted Epic:
+8. **Merge wave**: from the main repo, merge each Task branch sequentially into the integration branch (`git merge --no-ff <branch>`). Conflicts → pause; do not auto-resolve. Concatenate per-Task `DevTeam.<task-id>.log` fragments into the main `DevTeam.log` sorted by timestamp. Remove the worktrees.
+9. If any Task failed, was blocked, or surfaced an upstream decision → pause and ask the user how to proceed (fix, skip, restructure deps, escalate to evolution).
+10. Mark completed Tasks. Identify the next wave (Tasks whose deps are now satisfied). Repeat 6–9 until every Task is done.
+11. **Integration check**: run the full test suite (unit + medium + e2e) against the merged integration branch in the main repo. If failures emerge only when Tasks are combined → fix in scope or surface as a new Task.
+12. **Review + fix loop** on the integrated change (`11-review-fix-loop.md`).
+13. Update `docs/epics/README.md`: set this Epic's status to `done`.
+14. **kb-curator** → mandatory **pattern-extraction pass** (see `agents/kb-curator.md` → Pattern extraction): scan reviewer findings across this Epic's Tasks, add recurring issues to `docs/kb/common-pitfalls.md`. Optional follow-on: consolidate per-Task docs and prune duplicates.
+15. **Completion announcement** — must always happen, even after a partial / aborted Epic:
     - Print to the user (terminal output) a clearly visible message:
       `=== Epic <id> "<title>" completed ===`
       followed by a one-line summary (tasks done, tests green, reviewers clean).

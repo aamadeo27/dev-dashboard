@@ -12,7 +12,19 @@ This is a subroutine called by other sequences, not run standalone.
 
 ## Steps
 
-1. Run in parallel:
+0. **Stage the diff** (orchestrator, before any reviewer runs):
+   - Verify the working tree is clean — the coder (and tester, if it ran) must have committed before the review starts. If dirty, refuse to proceed; ask the responsible agent to commit.
+   - **Base commit** for iteration N:
+     - **Single-Task mode (main repo, no worktree)**:
+       - Iteration 1: parent of the coder's Fresh commit (the commit immediately before this Task started).
+       - Iteration N ≥ 2: the previous fix-pass commit.
+     - **Parallel mode (Task in its own worktree)**:
+       - Iteration 1: the `integration` branch tip at the moment the worktree was created (the worktree's base). Diff = `integration..HEAD`.
+       - Iteration N ≥ 2: the previous fix-pass commit on this branch.
+   - Generate `docs/tasks/<task-id>-diff-<iter>.patch` via `git diff <base>..HEAD`.
+   - Build a **changed-files list** (one path per line). Dump to `docs/tasks/<task-id>-changed-<iter>.txt` or pass inline if short.
+   - Both go into every reviewer invocation.
+1. Run in parallel, each invoked with the diff path + changed-files list as inputs (no broad search allowed):
    - **performance-reviewer**
    - **security-reviewer**
    - **scope-reviewer**

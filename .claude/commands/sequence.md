@@ -37,6 +37,97 @@ You are the orchestrator for a process sequence.
 - Surface every agent's flagged gaps or escalations to the user — do not silently resolve them.
 - If a sequence calls another sequence (e.g., `04-task-feature` → `11-review-fix-loop`), run it as a subroutine in place.
 
+## Code access — keep reads scoped
+
+Subagents do not share live context; each one re-reads from disk. Sloppy prompts cause broad Globs and 4× repeated reads. Follow these rules:
+
+1. **Name the files.** Always pass an explicit changed-files list (or path list) to agents that operate on code (reviewers, tester, coder fix passes). Do not let them discover the scope via broad search.
+2. **Pre-stage a diff file.** Before any review pass that follows a code change, dump the diff to `docs/tasks/<task-id>-diff-<iter>.patch` (use `git diff` against the base commit). Pass that path to every reviewer. They Read the patch first; the patch is much smaller than the full files.
+3. **Reference the KB index, never dump KB content.** Orchestrator and agents pass paths into KB sub-docs; never inline the index or sub-doc content.
+4. **No "explore the repo" prompts.** Never instruct an agent to "look around" or "find relevant files." If you can't name a path or path list, pause and resolve it yourself before invoking.
+
+## Worktree management (parallel Tasks)
+
+When a sequence runs Tasks in parallel within a wave (currently only `13-epic-execution`), each Task runs in its **own git worktree** on its own branch. Sequential Tasks (single-Task waves) run in the main repo directly.
+
+### Lifecycle per wave
+
+1. **Before launching the wave** (from main repo, on the `integration` branch — or default branch if none):
+   - For each Task in the wave:
+     ```
+     git worktree add ../<repo-name>-<task-id> -b <type>/<task-id>-<slug> <integration-branch>
+     ```
+     Use the branching convention from the DevOps KB (`feat/`, `fix/`, etc.).
+   - Record the worktree path → Task id mapping for the wave.
+2. **Invoke each Task's agents** with the worktree path as input. Every agent prompt must include:
+   - `worktree=<absolute-path>`
+   - `log_file=<worktree>/DevTeam.<task-id>.log` (overrides each agent's default `DevTeam.log`; agents log there for the duration of the Task)
+   Pass absolute paths for all other inputs (diff, findings, task doc) so agents don't need to resolve worktree-relative paths.
+3. **After the wave finishes**, in the main repo:
+   - Merge each Task branch sequentially into the integration branch:
+     ```
+     git merge --no-ff <type>/<task-id>-<slug>
+     ```
+   - **Resolve conflicts** per the Conflict resolution rules below. You (the orchestrator) own this — do not punt to the user except as a last resort.
+   - **Concat per-Task logs**: each worktree wrote to `DevTeam.<task-id>.log`. After merge, append all per-Task log entries to the main `DevTeam.log`, sorted by timestamp. Then delete the per-Task fragments (they're committed in the merge, can be removed via a follow-up commit if you don't want them in history).
+
+### Conflict resolution
+
+When `git merge` fails with conflicts, the orchestrator handles it. Classify each conflict and act:
+
+1. **Trivial textual** (formatter output, import ordering, line endings, generated files, `package-lock.json` / `pnpm-lock.yaml`):
+   - Resolve directly. Strategy: keep both Tasks' intent (union for imports, lockfile regenerate, formatter re-run on the merged file).
+   - Stage, continue the merge.
+2. **Same-region edits where one Task's change is a strict superset of the other** (rare but happens):
+   - Keep the superset. Stage, continue.
+3. **Semantic conflict** — two Tasks made incompatible changes to the same logic, function signature, or contract:
+   - Do **not** guess. Dispatch a **Coder fix pass** scoped to the conflict, with both Task docs + the merge-conflict markers as input. Coder reconciles intent.
+   - This signals an Architect failure (parallelism plan should have prevented it). Log it and feed it back: `[Architect feedback] Tasks <a>+<b> conflicted; parallelism plan needs revision`. kb-curator picks this up in the post-Epic pass.
+4. **Test conflict** — both Tasks edited the same test file:
+   - Usually trivial union. If tests assert contradictory behaviors → semantic conflict, follow rule 3.
+5. **Unresolvable / unsafe** (you're not sure which side is right after one Coder reconciliation pass):
+   - **Then** pause and ask the user. Last resort.
+
+Always log every conflict and its resolution:
+
+```
+[<ts>] [orchestrator] [Merge conflict] task=<id> files=[<paths>] kind=<trivial|superset|semantic|test|unresolvable> resolution=<auto|coder|user>
+```
+
+Never use `git merge -X ours` or `-X theirs` blindly — those drop changes silently.
+4. **Remove worktrees**:
+   ```
+   git worktree remove ../<repo-name>-<task-id>
+   ```
+
+### Rules
+
+- Never run agents from two parallel Tasks against the same worktree.
+- The KB (`docs/kb/`) lives in the main repo and is read-only during a wave. If a Task needs a KB change → surface as escalation; do not mutate KB inside a worktree.
+- Per-Task files (`docs/tasks/<task-id>.md`, `<task-id>-findings.md`, `<task-id>-diff-<iter>.patch`, `DevTeam.<task-id>.log`) live **inside** the worktree and travel with the merge.
+- Merge conflicts on `DevTeam.log` are avoided by using per-Task log fragments and only writing the consolidated `DevTeam.log` from the main repo after merge.
+- For single-Task waves, skip the worktree dance entirely — work directly in the main repo on a branch per the DevOps pattern.
+
+## Subagent prompt construction
+
+How you build the prompt for each Task tool invocation directly affects token cost and cache hit rate. Follow these three rules:
+
+1. **Pass file paths, not content.** Do not inline the Knowledge Base, Task docs, findings, UI/UX specs, or any other persistent doc into the prompt. Pass the path; the agent will Read what it needs. Inlined content burns input tokens every call and defeats prompt caching.
+   - Bad: `Here is the KB: <2KB blob>...`
+   - Good: `Read docs/kb/index.md and the patterns/contracts entries relevant to your Task.`
+
+2. **Do not re-state the agent's own rules.** Each agent's `.md` body is already its system prompt — it knows its lane, output format, and process. Your user prompt should only carry the **inputs** for this invocation (Task id, paths, mode, tech-decision mode, etc.) — not a restatement of what the agent does.
+   - Bad: `You are the Coder. Implement only the assigned Task. Stay in scope. Read the KB...`
+   - Good: `Task: T2.5. Mode: fix-pass. Findings: docs/tasks/T2.5-findings.md. Task doc: docs/tasks/T2.5.md.`
+
+3. **Stable prefix, variable tail.** Build every Task prompt in this fixed order so the Anthropic prompt cache hits across invocations:
+   1. **Role + mode line** (e.g., `task=T2.5 mode=fix-pass iteration=3`)
+   2. **Static input paths block** (KB pointer, Task doc path, findings path, UI/UX spec path) — same shape every call
+   3. **Sequence context** (sequence name, current phase) — same shape every call
+   4. **Variable delta** (this iteration's specific instruction, e.g., "address findings F-3 and F-7") — at the end
+
+   Putting the variable part last keeps the prefix stable, which lets the cache match across iterations and across tasks within the same Epic.
+
 ## Logging
 
 Maintain `DevTeam.log` at the project root with the same format the agents use:

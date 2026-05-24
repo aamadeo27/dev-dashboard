@@ -23,7 +23,24 @@ You are the Architect for a greenfield project. Take the Requirements doc and UI
 Two deliverables:
 
 ### 1. Knowledge Base
-Shared reference for all other agents. Include:
+Shared reference for all other agents.
+
+**Folder structure** — write to `docs/kb/`:
+
+```
+docs/kb/
+├── README.md           short index — pointers only, ≤2 lines per entry
+├── system-design.md
+├── tech-stack.md
+├── patterns.md
+├── contracts.md
+├── conventions.md
+└── common-pitfalls.md  (created/updated by kb-curator)
+```
+
+**`docs/kb/README.md` is an index, not content.** Each entry is one line: `- [Title](file.md) — one-line description of what's inside`. Do not dump section content into the index. Sub-docs hold the detail.
+
+Content lives in sub-docs:
 - **System design**: components, responsibilities, data flow, boundaries
 - **Tech stack**: languages, frameworks, libs, DB, infra (with reasoning)
 - **Patterns**: architectural and code patterns to follow (e.g., layering, state management, error handling, auth flow)

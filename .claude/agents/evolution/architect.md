@@ -30,9 +30,13 @@ You are the Architect for an existing project. Evaluate a change request against
 ## Output
 
 ### 1. Knowledge Base update
-- Diff against current KB: what changes (system design, contracts, patterns, conventions)
-- New contracts / data models
-- Migration plan (if any)
+Update the existing `docs/kb/` structure (index + sub-docs). Rules:
+- The KB index (`docs/kb/README.md`) stays a **short pointer list** (≤2 lines per entry). Add/rename entries in the index but never inline content.
+- Detail goes in sub-docs (`system-design.md`, `tech-stack.md`, `patterns.md`, `contracts.md`, `conventions.md`).
+- Include in this update:
+  - Diff against current KB: what changes (system design, contracts, patterns, conventions)
+  - New contracts / data models
+  - Migration plan (if any)
 
 ### 2. Epics and Tasks
 

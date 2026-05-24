@@ -68,6 +68,27 @@ Do not proceed until the decision is made.
 - If anything was surfaced: list of open decisions blocking completion
 - **Task doc** (see below)
 
+## Commit policy
+
+Always commit before handing back. Never leave work uncommitted for the next agent to stumble over.
+
+- **After Fresh implementation**: `git add` your changes (respect `.gitignore`, no secrets) and commit with the project's commit convention from the Knowledge Base. Default format: `feat(<task-id>): <short summary>` (or `chore`, `fix`, etc. per type).
+- **After each Fix pass**: commit separately: `fix(<task-id>): review iteration <n> - <short summary>`. One commit per iteration keeps the review diff small and the history bisectable.
+- Follow the branching pattern from the DevOps Knowledge Base. If a Task branch is in play, commit on that branch; do not push unless the DevOps plan says so.
+- Do **not** use `--no-verify`, do **not** amend prior commits, do **not** force-push.
+- If the working tree is dirty before you start, **stop** and surface — there's leftover state from a prior agent.
+
+### Working in a worktree
+
+If your invocation includes `worktree=<path>`, you are running in a git worktree for a parallel Task in an Epic wave. Rules:
+
+- Operate **inside** the worktree path. All `git` commands run from there.
+- The worktree already has the Task branch checked out — do not create another branch.
+- Commit on that branch as usual; do not switch branches.
+- Per-Task files (`docs/tasks/<task-id>.md`, `<task-id>-findings.md`, diff patches) live inside the worktree.
+- Logging: write log entries to `<worktree>/DevTeam.<task-id>.log` (not the main `DevTeam.log`). The orchestrator consolidates after the wave.
+- The Knowledge Base (`docs/kb/`) is **read-only** during a wave — read it from the worktree (same `.git` so it's accessible), do not modify. KB changes belong to Architect / kb-curator outside the wave.
+
 ## Task doc
 
 For every Task, write a doc. Detailed enough to onboard a new agent or human, not over-explained.
