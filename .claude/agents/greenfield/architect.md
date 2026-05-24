@@ -71,7 +71,15 @@ docs/epics/
   - tag (`frontend` / `backend` / `infra` / `shared`)
   - **dependencies**: other Task ids (within the Epic or from earlier Epics — use full id `001.T03` if cross-Epic)
   - acceptance criteria
-  - contract references (links to Knowledge Base entries)
+  - **kb-refs**: list the specific KB items this Task needs. Format:
+    ```
+    kb-refs:
+      patterns:    [error-handling, auth-flow]
+      contracts:   [user-api, session-token]
+      conventions: [naming, testing]
+      tech-stack:  [react, postgres]
+    ```
+    Only list items that exist in `docs/kb/<sub-doc>/`. Agents read only these items plus each folder's `README.md`. Leave a category out if no item applies.
 - **Dependency graph & parallelism plan**: required section. List the waves explicitly so the orchestrator does not have to recompute. Format:
   ```
   Wave 1 (parallel): T01, T05         # no deps

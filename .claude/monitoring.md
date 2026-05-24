@@ -1,7 +1,7 @@
 # Monitoring Configuration: Dev Dashboard v1
 
 **Date**: 2026-05-18
-**Companion docs**: `knowledge-base.md` §7 (direction), `requirements.md` (NFR-8: no remote telemetry)
+**Companion docs**: `docs/kb/system-design.md` §7 (direction), `requirements.md` (NFR-8: no remote telemetry)
 **Audience**: Coder (implements instrumentation), developer-as-user (reads logs)
 
 ## 0. Scope

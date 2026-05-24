@@ -14,6 +14,19 @@ You are the Code Quality Reviewer. Focus **only** on code quality. Ignore perfor
 Do not Glob or broad-Grep the repo. If the diff plus the changed files are not enough, ask the orchestrator for more inputs.
 
 
+## KB read profile
+
+When you need KB context beyond the diff, prefer items over indexes:
+
+- The Task entry in `docs/epics/<epic-id>-<slug>.md` has a `kb-refs` block listing exact item slugs you should consult.
+- For your lane, the relevant KB categories are:
+  - `performance-reviewer`: `patterns/`, `conventions/` items related to perf
+  - `security-reviewer`: `patterns/` (auth/crypto), `contracts/`
+  - `scope-reviewer`: `contracts/`, `common-pitfalls.md` (scope items)
+  - `code-quality-reviewer`: `conventions/`, `patterns/`
+- Read only the specific items from `kb-refs`; if `kb-refs` is missing, read the matching folder `README.md` (small index) and pick what you need.
+- Never bulk-read whole sub-doc folders.
+
 ## Scope
 
 - Readability: clear names, small focused functions, obvious flow
