@@ -24,30 +24,29 @@ This is a subroutine called by other sequences, not run standalone.
    - Generate `docs/tasks/<task-id>-diff-<iter>.patch` via `git diff <base>..HEAD`.
    - Build a **changed-files list** (one path per line). Dump to `docs/tasks/<task-id>-changed-<iter>.txt` or pass inline if short.
    - Both go into every reviewer invocation.
-1. Run in parallel, each invoked with the diff path + changed-files list as inputs (no broad search allowed):
-   - **performance-reviewer**
-   - **security-reviewer**
-   - **scope-reviewer**
-   - **code-quality-reviewer**
+1. Run with the diff path + changed-files list as inputs (no broad search allowed):
+   - **basic-reviewer** (single agent — runs scope pass then quality pass, returns two-section findings)
+
+   Note: `performance-reviewer` and `security-reviewer` are **deferred to Epic-end** and do not run per-Task. See `13-epic-execution.md`.
 2. Collect findings, grouped by severity. Persist them to `docs/tasks/<task-id>-findings.md` (append for each iteration; never overwrite history).
 3. If no critical or high findings → done.
-4. **Re-review planning** (orchestrator) — **before** dispatching the coder, decide which reviewers will need to run after the fix pass. Default rule:
-   - Re-run every reviewer that had a critical or high finding the coder must address.
-   - Also re-run any reviewer whose lane is touched by the planned fix area (e.g., if fixes touch async code, perf reviewer re-runs even if it had no findings).
-   - Skip reviewers with zero findings whose lane the fix doesn't touch.
-   - Record the planned re-review set in the findings file as `Re-review plan: [perf, quality]` (etc.).
+4. **Re-review planning** (orchestrator) — before dispatching the coder, decide whether the basic-reviewer needs to re-run after the fix pass. With only one reviewer per Task, the rule is simple:
+   - If the previous review had any critical or high finding (scope or quality) → re-run after the fix.
+   - If all findings were medium/low and the coder is only addressing those → re-run only if the fix touches the same lane as the findings; otherwise skip re-review and exit.
+   - Record the decision in the findings file as `Re-review plan: [basic-reviewer]` or `[skip]`.
 5. **coder** addresses findings — invoke in **Fix pass** mode (see `agents/coder.md` → Invocation modes). The invocation prompt must include:
    - `mode: fix-pass`
    - `task-id: <task-id>`
    - The path to `docs/tasks/<task-id>-findings.md`
    - The path to `docs/tasks/<task-id>.md`
    Coder reads both files at start, applies only the listed fixes, appends a fix summary to the Task doc.
-6. Run **only the reviewers from the re-review plan**, in parallel. Do not run the others.
+6. Re-run the basic-reviewer if the plan says so. Otherwise skip.
 7. Repeat from step 2 until clean.
 
 ## Exit conditions
-- All four reviewers report no critical and no high findings.
+- basic-reviewer reports no critical and no high findings (scope) and no high findings (quality).
 - Medium / low findings are noted but do not block merge unless user says otherwise.
+- Security and performance reviews happen at Epic-end, not here.
 
 ## Notes
 - Run reviewers in parallel; they don't depend on each other.

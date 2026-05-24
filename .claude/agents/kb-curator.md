@@ -50,7 +50,7 @@ Process:
      - **Rule**: what to do instead (one line, actionable)
      - **First seen**: Task id where it first appeared
      - **Examples**: 1-2 short code snippets if helpful
-4. Cross-link from `docs/kb/patterns/README.md` to the new pitfall entries.
+4. Cross-link from `docs/kb/patterns.md` to the new pitfall entries.
 5. Log a summary: `[KB pitfalls updated] N entries added/updated, M dedup-ed`.
 
 Output:

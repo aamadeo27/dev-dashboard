@@ -200,15 +200,15 @@ Run through this checklist before each invocation. If every condition is `yes`, 
 5. No fix changes a public API contract, data model, or env-var shape.
 
 **Trigger H-RR (reviewer re-review, non-security)** — use Haiku when:
-1. This is a **re-review** (not the first pass on a Task).
-2. The reviewer is **performance**, **scope**, or **code-quality** (never security).
+1. This is a **re-review** (not the first pass).
+2. The reviewer is **basic-reviewer** or **performance** (never security).
 3. The fix diff being reviewed is **< 200 lines changed**.
 4. No file in the diff lives under security-sensitive paths.
 
 **Trigger H-KBP (kb-curator pattern-extraction)** — always use Haiku for the post-Epic pattern-extraction pass. Mechanical aggregation, no judgment that justifies Sonnet.
 
-**Trigger H-SCOPE (scope-reviewer on small diff)** — use Haiku when:
-1. Reviewer is **scope-reviewer**.
+**Trigger H-BASIC (basic-reviewer on small diff)** — use Haiku when:
+1. Reviewer is **basic-reviewer**.
 2. Diff being reviewed is **< 100 lines changed**.
 3. No new files added; no files deleted.
 
@@ -225,7 +225,7 @@ Always keep the default model for:
 Whenever you route to Haiku, emit a dedicated log line **immediately before** the Task invocation, in addition to the normal `[Usage checkpoint]` line:
 
 ```
-[<ts>] [orchestrator] [Haiku route] agent=<agent-name> task=<task-id?> iteration=<n?> trigger=<H-FIX|H-RR|H-KBP|H-SCOPE> reason="<one-line why>"
+[<ts>] [orchestrator] [Haiku route] agent=<agent-name> task=<task-id?> iteration=<n?> trigger=<H-FIX|H-RR|H-KBP|H-BASIC> reason="<one-line why>"
 ```
 
 Include the **trigger id** so we can audit which rule fired. Examples:
