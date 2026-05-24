@@ -9,7 +9,10 @@ pub mod sequences;
 pub mod settings;
 pub mod usage;
 
+use std::sync::Arc;
+
 use app_state::AppState;
+use settings::SettingsStore;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,9 +35,30 @@ pub fn run() {
 
     tracing::info!(config_dir = %config_dir.display(), "config dir resolved");
 
+    // Load settings before constructing AppState so any first-launch defaults
+    // are applied (and optionally persisted) before the first IPC command fires.
+    let settings_store = SettingsStore::load(&config_dir);
+
+    // Write defaults to disk on first launch so settings.json always exists after startup.
+    if !config_dir.join("settings.json").exists() {
+        let json = serde_json::to_string_pretty(settings_store.settings()).unwrap_or_default();
+        if let Err(e) = std::fs::write(config_dir.join("settings.json"), json) {
+            tracing::warn!(error = %e, "failed to write initial settings file on first launch");
+        }
+    }
+
+    let projects_registry = projects::ProjectRegistry::load(&config_dir);
+
+    let git_poller = Arc::new(crate::projects::git::GitPoller::new());
+
     let state = AppState {
         config_dir,
         log_guard,
+        settings: Arc::new(tokio::sync::Mutex::new(settings_store)),
+        projects: Arc::new(tokio::sync::Mutex::new(projects_registry)),
+        git_poller: git_poller.clone(),
+        sequence_loader: sequences::SequenceLoader::new_arc(),
+        run_manager: runs::RunManager::new_arc(),
     };
 
     tauri::Builder::default()
@@ -42,11 +66,72 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(state)
-        .invoke_handler(tauri::generate_handler![
-            ipc::commands::ping,
-            ipc::commands::ping_error,
-            ipc::commands::log_frontend_error,
-        ])
+        .setup(|app| {
+            // Start the background CLI-loss watcher (T1.6).
+            // manage() has already run so app.state() is available here.
+            let settings = app.state::<AppState>().settings.clone();
+            ipc::cli_watcher::start(app.handle().clone(), settings);
+
+            // Start the git poller (T2.3).
+            let settings = app.state::<AppState>().settings.clone();
+            let projects = app.state::<AppState>().projects.clone();
+            let git_poller_arc = app.state::<AppState>().git_poller.clone();
+            crate::projects::git::start(app.handle().clone(), settings, projects, git_poller_arc);
+
+            Ok(())
+        })
+        .invoke_handler({
+            #[cfg(debug_assertions)]
+            { tauri::generate_handler![
+                ipc::commands::ping,
+                ipc::commands::ping_error,
+                ipc::commands::log_frontend_error,
+                ipc::commands::get_settings,
+                ipc::commands::update_settings,
+                ipc::commands::open_logs_folder,
+                ipc::commands::verify_claude_cli,
+                ipc::commands::list_projects,
+                ipc::commands::add_project,
+                ipc::commands::remove_project,
+                ipc::commands::relocate_project,
+                ipc::commands::set_project_tags,
+                ipc::commands::rename_project,
+                ipc::commands::scan_project,
+                ipc::commands::open_in_editor,
+                ipc::commands::open_in_terminal,
+                ipc::commands::get_git_status,
+                ipc::commands::set_visible_projects,
+                ipc::commands::list_sequences,
+                ipc::commands::refresh_sequences,
+                ipc::commands::launch_run,
+                ipc::commands::stop_run,
+                ipc::commands::send_input,
+            ] }
+            #[cfg(not(debug_assertions))]
+            { tauri::generate_handler![
+                ipc::commands::ping,
+                ipc::commands::log_frontend_error,
+                ipc::commands::get_settings,
+                ipc::commands::update_settings,
+                ipc::commands::open_logs_folder,
+                ipc::commands::verify_claude_cli,
+                ipc::commands::list_projects,
+                ipc::commands::add_project,
+                ipc::commands::remove_project,
+                ipc::commands::relocate_project,
+                ipc::commands::set_project_tags,
+                ipc::commands::scan_project,
+                ipc::commands::open_in_editor,
+                ipc::commands::open_in_terminal,
+                ipc::commands::get_git_status,
+                ipc::commands::set_visible_projects,
+                ipc::commands::list_sequences,
+                ipc::commands::refresh_sequences,
+                ipc::commands::launch_run,
+                ipc::commands::stop_run,
+                ipc::commands::send_input,
+            ] }
+        })
         .run(tauri::generate_context!())
         .expect("Tauri application failed to start — check logs for initialization errors");
 }

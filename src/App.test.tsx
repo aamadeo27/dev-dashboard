@@ -1,8 +1,55 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { Suspense, lazy } from "react";
 import { act } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+
+// Mock Tauri plugin-dialog so Setup.tsx's Browse button import doesn't throw in jsdom.
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn().mockResolvedValue(null),
+}));
+
+// Mock Tauri event API used by useGitStatusListener (subscribe → listen).
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
+
+// Mock Tauri invoke so routes that use IPC (e.g. Settings, Dashboard, Setup) don't throw
+// "No QueryClient set" or "invoke is not a function" in jsdom.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn((cmd: string) => {
+    if (cmd === "verify_claude_cli") {
+      // Return found=true so Dashboard does not redirect to /setup in tests.
+      return Promise.resolve({
+        found: true,
+        resolved_path: "/usr/bin/claude",
+        version: "1.0.0",
+        error: null,
+      });
+    }
+    if (cmd === "list_projects") {
+      return Promise.resolve([]);
+    }
+    // Default: return a valid Settings shape for get_settings / update_settings.
+    return Promise.resolve({
+      parent_dir: null,
+      claude_cli_path: null,
+      git_poll_interval_secs: 10,
+      usage_poll_interval_secs: 60,
+      retention_days: 30,
+      retention_size_mb: 500,
+      view_mode: "Grid",
+    });
+  }),
+}));
+
+function renderWithProviders(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 // App uses HashRouter which reads window.location.hash.
 // In jsdom we set window.location.hash before rendering to simulate navigation.
@@ -15,33 +62,35 @@ describe("App", () => {
   it("renders S-01 Setup on /setup route", async () => {
     window.location.hash = "#/setup";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
-    expect(await screen.findByText("S-01 Setup")).toBeTruthy();
+    // The real Setup screen renders an h1 "Claude CLI not found"
+    expect(await screen.findByRole("heading", { name: "Claude CLI not found" })).toBeTruthy();
   });
 
   it("renders S-02 Dashboard on / route", async () => {
     window.location.hash = "#/";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
-    expect(await screen.findByText("S-02 Dashboard")).toBeTruthy();
+    expect(await screen.findByText("dev-dashboard")).toBeTruthy();
   });
 
   it("renders S-07 Settings on /settings route", async () => {
     window.location.hash = "#/settings";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
-    expect(await screen.findByText("S-07 Settings")).toBeTruthy();
+    // Real Settings screen renders an h1 with "Settings" (placeholder text removed)
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
   });
 
   it("redirects unknown routes to Dashboard", async () => {
     window.location.hash = "#/this-route-does-not-exist";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
-    expect(await screen.findByText("S-02 Dashboard")).toBeTruthy();
+    expect(await screen.findByText("dev-dashboard")).toBeTruthy();
   });
 
   // --- Additional route coverage ---
@@ -49,7 +98,7 @@ describe("App", () => {
   it("renders S-03 Project Detail on /projects/:projectId route", async () => {
     window.location.hash = "#/projects/some-id";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
     expect(await screen.findByText("S-03 Project Detail")).toBeTruthy();
   });
@@ -57,7 +106,7 @@ describe("App", () => {
   it("renders S-04 Run Live on /runs/:runId/live route", async () => {
     window.location.hash = "#/runs/some-id/live";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
     expect(await screen.findByText("S-04 Run Live")).toBeTruthy();
   });
@@ -65,7 +114,7 @@ describe("App", () => {
   it("renders S-05 Run Historical on /runs/:runId/history route", async () => {
     window.location.hash = "#/runs/some-id/history";
     await act(async () => {
-      render(<App />);
+      renderWithProviders(<App />);
     });
     expect(await screen.findByText("S-05 Run Historical")).toBeTruthy();
   });
