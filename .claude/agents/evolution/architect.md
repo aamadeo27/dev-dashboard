@@ -56,7 +56,7 @@ docs/epics/
 **Per-Epic file contents** (same as greenfield):
 - Title, goal, motivation (link the change request)
 - Definition of Done
-- Tasks (`<epic-id>.T01`, ...): title, description, tag (`frontend` / `backend` / `infra` / `shared`), **dependencies** (intra-Epic or full id `NNN.TXX` for cross-Epic), acceptance criteria, contract references, **regression notes** (specific to evolution).
+- Tasks (`<epic-id>.T01`, ...): title, description, tag (`frontend` / `backend` / `infra` / `shared`), **dependencies** (intra-Epic or full id `NNN.TXX` for cross-Epic), acceptance criteria, **kb-refs** (specific KB items needed — same shape as greenfield: `patterns`, `contracts`, `conventions`, `tech-stack` lists of item slugs), **regression notes** (specific to evolution).
 - **Dependency graph & parallelism plan**: required. Same format as greenfield — list waves explicitly so the orchestrator does not have to recompute. Serialize Tasks that share files even if their formal deps allow parallel.
 - Risks / open questions
 

@@ -27,13 +27,23 @@ You may be invoked in two modes:
 
 ## Inputs
 
-Before writing any code, read:
-- The assigned **Task** (acceptance criteria, contracts, dependencies)
-- **Requirements** (goal, priorities, actions)
-- **Knowledge Base** from Architect (system design, stack, patterns, contracts, conventions)
-- **`docs/kb/common-pitfalls.md`** — read the entries relevant to your stack and Task type. These are mistakes the team has already made; do not repeat them.
-- **UI/UX spec** for the affected screens (for frontend tasks)
-- **DevOps plan** for env vars, secrets, branching/PR rules
+Before writing any code, read **only what the Task needs**. Do not bulk-read the KB.
+
+1. The assigned **Task** entry in `docs/epics/<epic-id>-<slug>.md` (acceptance criteria, deps, **kb-refs**, contract references).
+2. The Task's `kb-refs` block tells you exactly which KB items to read. For each category present in `kb-refs`, read:
+   - `docs/kb/<category>/<slug>.md` for every listed slug.
+   - Do **not** read the category's `README.md` unless `kb-refs` is missing or empty for that category — the README is for browsing, the items have the content.
+3. If `kb-refs` is missing or incomplete:
+   - Read the index of each relevant category (`docs/kb/patterns/README.md`, `conventions/README.md`, etc.) — the index is small, one line per item.
+   - Pick the items relevant to your Task. Surface back to the Architect afterwards so they fill in `kb-refs` for next time.
+4. **Always read** (small, mandatory):
+   - `docs/kb/README.md` (top-level pointer index)
+   - `docs/kb/common-pitfalls.md` — entries relevant to your stack / Task type.
+5. **`docs/kb/system-design.md`** — read only when the Task touches a component boundary or introduces new components.
+6. **UI/UX spec** for the affected screens (frontend Tasks).
+7. **DevOps refs** — only the items the Task explicitly touches (branching pattern + secrets pattern by default).
+
+Rule: if you are unsure whether you need an item, **don't** read it. Read it only when you hit a question it would answer.
 
 ## Rules
 

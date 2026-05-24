@@ -82,9 +82,9 @@ The heart. Unblocks live and historical run views.
 
 ### T4.8 [backend] Research: step-failure interaction protocol
 
-- **Description**: Before implementing Retry/Skip/Abort/Continue UI, verify whether Claude CLI (interactive mode) supports receiving specific stdin tokens to influence mid-run behavior, or whether "retry" must be implemented as: kill current subprocess + re-invoke the same step. Document findings in knowledge-base.md §9 and update T4.7 scope accordingly.
+- **Description**: Before implementing Retry/Skip/Abort/Continue UI, verify whether Claude CLI (interactive mode) supports receiving specific stdin tokens to influence mid-run behavior, or whether "retry" must be implemented as: kill current subprocess + re-invoke the same step. Document findings in docs/kb/system-design.md §9 and update T4.7 scope accordingly.
 - **Acceptance**:
-  - knowledge-base.md §9 updated with concrete finding: either (a) exact stdin tokens confirmed, or (b) "retry = new subprocess" approach documented with implementation plan.
+  - docs/kb/system-design.md §9 updated with concrete finding: either (a) exact stdin tokens confirmed, or (b) "retry = new subprocess" approach documented with implementation plan.
   - T4.7 acceptance criteria updated to match.
 - **Dependencies**: T4.1, T4.3 (need a running interactive session to test).
 - **Note**: If stdin tokens don't work, the "Continue" action = re-invoke the step. "Retry" = same. "Skip" = advance to next step index. "Abort" = kill and mark failed. These can all be implemented without special stdin tokens.

@@ -13,7 +13,7 @@ This repo manages **zero secrets**. There are no API keys, tokens, or credential
 - The `claude` CLI handles its own authentication externally (managed by Claude Code, not this repo).
 - No `.env` files, no secret manager integration, no credentials injected at build or runtime.
 - Nothing needs to be gitignored for security reasons beyond standard OS build artifacts.
-- If this changes in a future version, see the Secrets Management section in `knowledge-base.md`.
+- If this changes in a future version, see the Secrets Management section in `docs/kb/conventions/secrets.md`.
 
 ---
 

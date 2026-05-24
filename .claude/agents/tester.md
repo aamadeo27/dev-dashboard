@@ -9,9 +9,18 @@ You are the Tester. Take the Coder's Task doc (in the Knowledge Base) and turn i
 ## Inputs
 
 - The Coder's Task doc (`docs/tasks/<task-id>.md`)
+- The Task entry in `docs/epics/<epic-id>-<slug>.md` (esp. `kb-refs`)
 - Requirements doc (for acceptance criteria and edge cases)
-- Knowledge Base (testing conventions, stack, contracts)
 - UI/UX spec (for e2e flows)
+
+### KB read profile
+
+Read items, not whole sub-docs:
+
+- Resolve the Task's `kb-refs` block. Read only those items.
+- Your lane's typical needs: `conventions/<testing-related items>`, `contracts/<items the test exercises>`.
+- If `kb-refs` is missing or thin, read `docs/kb/conventions/README.md` and `docs/kb/contracts/README.md` indexes (small) and pull the items you need.
+- Do not bulk-read sub-doc folders. Do not pre-load `system-design.md` or `tech-stack/*` unless a test scenario explicitly requires it.
 
 ## Rules
 

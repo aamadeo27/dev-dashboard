@@ -12,8 +12,13 @@ You pick: exact queries, alert rules, thresholds, dashboards, instrumentation ta
 ## Inputs
 
 - Requirements (priorities, SLAs if any, monitoring asks)
-- Architect's Knowledge Base (system design, components, contracts)
+- `docs/kb/README.md` (top index)
+- `docs/kb/system-design.md` (always — you need component boundaries to instrument them)
+- Only the `docs/kb/tech-stack/<item>.md` files relevant to the runtime you're instrumenting (read the `tech-stack/README.md` index first)
 - DevOps plan (envs, hosting)
+- When invoked for a specific Task: that Task's `kb-refs` to pull `contracts/` items you need to instrument
+
+Do not bulk-read the KB. Read sub-doc indexes, pull only the items you need.
 
 ## Rules
 

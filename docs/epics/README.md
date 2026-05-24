@@ -1,7 +1,7 @@
 # Epics: Dev Dashboard v1
 
 **Date**: 2026-05-18
-**Companion doc**: `../../.claude/knowledge-base.md` (read first)
+**Companion doc**: `../../docs/kb/README.md` (read first)
 
 ## Conventions
 

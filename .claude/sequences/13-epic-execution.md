@@ -30,10 +30,15 @@ If the Epic argument is missing or ambiguous → read `docs/epics/README.md`, sh
 9. If any Task failed, was blocked, or surfaced an upstream decision → pause and ask the user how to proceed (fix, skip, restructure deps, escalate to evolution).
 10. Mark completed Tasks. Identify the next wave (Tasks whose deps are now satisfied). Repeat 6–9 until every Task is done.
 11. **Integration check**: run the full test suite (unit + medium + e2e) against the merged integration branch in the main repo. If failures emerge only when Tasks are combined → fix in scope or surface as a new Task.
-12. **Review + fix loop** on the integrated change (`11-review-fix-loop.md`).
-13. Update `docs/epics/README.md`: set this Epic's status to `done`.
-14. **kb-curator** → mandatory **pattern-extraction pass** (see `agents/kb-curator.md` → Pattern extraction): scan reviewer findings across this Epic's Tasks, add recurring issues to `docs/kb/common-pitfalls.md`. Optional follow-on: consolidate per-Task docs and prune duplicates.
-15. **Completion announcement** — must always happen, even after a partial / aborted Epic:
+12. **Review + fix loop** on the integrated change (`11-review-fix-loop.md`) — basic-reviewer pass on the integrated diff.
+13. **Epic-end security + performance review** (this is the safety net deferred from per-Task review):
+    - Stage the integrated diff: `git diff <epic-base>..HEAD` of the integration branch → `docs/epics/<id>-diff.patch`.
+    - Run **security-reviewer** and **performance-reviewer** in parallel on that diff.
+    - Findings → if any critical / high → dispatch coder fix passes (scoped to the findings); re-run only the reviewer that found the issue until clean. Mediums and lows become follow-up Tasks (logged, deferred).
+    - Exit condition: no critical / high findings from either reviewer.
+14. Update `docs/epics/README.md`: set this Epic's status to `done`.
+15. **kb-curator** → mandatory **pattern-extraction pass** (see `agents/kb-curator.md` → Pattern extraction): scan reviewer findings across this Epic's Tasks, add recurring issues to `docs/kb/common-pitfalls.md`. Optional follow-on: consolidate per-Task docs and prune duplicates.
+16. **Completion announcement** — must always happen, even after a partial / aborted Epic:
     - Print to the user (terminal output) a clearly visible message:
       `=== Epic <id> "<title>" completed ===`
       followed by a one-line summary (tasks done, tests green, reviewers clean).
