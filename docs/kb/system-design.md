@@ -180,5 +180,22 @@ Items where the architecture defers to implementation discovery. Coder must vali
 
 1. **EventParser heuristic patterns**: must be validated against actual interactive Claude CLI output before T4.1 is complete. Capture a representative session transcript, list each pattern in §6.7, and confirm a real-world example matches. Record the CLI version tested in `runs/parser/patterns.rs` as the pattern-set baseline.
 2. **`claude /usage` stdout format**: verify the exact parseable shape; the data model assumes a `BTreeMap<String, String>` which is forgiving.
-3. **Step-failure interaction protocol** (BLOCKER-02, T4.8): confirm whether interactive Claude CLI supports stdin tokens to influence mid-run behavior (Retry/Skip/Abort/Continue), or whether all four choices must be implemented as "kill subprocess + re-invoke the step". Document the concrete finding here: either (a) exact stdin tokens confirmed, or (b) "retry = new subprocess" approach documented with implementation plan. T4.7 acceptance is updated to match the outcome.
+3. **Step-failure interaction protocol** (BLOCKER-02, T4.8): **RESOLVED — option (b) kill + re-invoke** (conservative default; see T4.8 task doc for full reasoning).
+
+   **Evidence reviewed (T4.8)**:
+   - T1.2 probe only ran `claude --version` with `.stdin(Stdio::null())`; no step-failure interactive behavior was observed or captured.
+   - The EventParser (`patterns.rs`) has `STEP_FAILED_SENTINEL = ""` (disabled placeholder); no "waiting for input" marker was ever identified in CLI output.
+   - `RunSession` has a generic `input_rx` stdin channel but no step-failure-specific state or routing.
+   - No Claude CLI documentation, `--help` capture, or prior transcript shows a stdin-token prompt for step recovery.
+
+   **Resolution — (b) kill + re-invoke**, per-choice plan:
+
+   | Choice | Implementation |
+   |---|---|
+   | **Continue** | No kill needed. Write `"\n"` (empty line) to stdin as a "proceed" signal. If that does not unblock the CLI within a 2 s window, fall back to kill + re-invoke the original prompt with `--continue` flag if available, or bare re-invoke. Auto-triggered after 60 s timeout. |
+   | **Retry** | Kill the current child process (`child.kill()`). Re-invoke Claude CLI with the same `LaunchInput` (same prompt and attached context). A new `run_id` is minted; the UI links it to the original as a retry. |
+   | **Skip** | Kill the current child process. Re-invoke Claude CLI with a modified prompt that instructs the model to skip the failing step and continue from the next one (prompt prefix: `"Skip the previous failing step and continue."` followed by the original prompt). |
+   | **Abort** | Kill the current child process (`child.kill()`). Mark the run `RunStatus::Failed` with `exit_note = "Aborted by user"`. Do not re-invoke. |
+
+   **Rationale for conservative default**: option (b) is correct regardless of whether a stdin token protocol exists. If a future Claude CLI version adds stdin tokens (e.g. pressing `y`/`n` at a recovery prompt), option (b) can be enhanced to try the token first and fall back to kill+re-invoke on timeout. Implementing (b) first gives a working system with no risk of blocking on an unconfirmed stdin protocol.
 4. **PID matching on orphan reap**: confirm the process name reported by `sysinfo` matches `claude` (or the configured CLI path) across all three OSes. Conservative: only kill if PID is alive AND exe path matches the configured CLI path.
