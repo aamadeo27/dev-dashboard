@@ -264,6 +264,20 @@ pub async fn log_frontend_error(
     stack: Option<String>,
     route: Option<String>,
 ) {
+    // Sanitize fields: cap length and strip control chars (< 0x20 except \t, plus 0x7F).
+    // `message` also strips \n to prevent log-line forging in line-oriented log sinks.
+    // `stack` keeps \n so multi-line stack traces remain readable.
+    let sanitize = |s: &str, max_len: usize, keep_newline: bool| -> String {
+        s.chars()
+            .filter(|&c| (keep_newline && c == '\n') || c == '\t' || (c >= '\x20' && c != '\x7F'))
+            .take(max_len)
+            .collect()
+    };
+
+    let message = sanitize(&message, 4096, false);
+    let stack   = stack.as_deref().map(|s| sanitize(s, 8192, true));
+    let route   = route.as_deref().map(|s| sanitize(s, 512, false));
+
     let correlation_id = uuid::Uuid::new_v4().to_string();
     tracing::error!(
         component = "frontend",
@@ -557,6 +571,45 @@ pub async fn refresh_sequences(
 // Run commands (T4.3)
 // ---------------------------------------------------------------------------
 
+/// Returns `true` iff `name` is a safe sequence name that can be passed to the
+/// CLI without risk of flag injection or shell special-character issues.
+///
+/// Rules:
+/// - Must not be empty.
+/// - Must not be longer than 256 characters.
+/// - Must not start with `-` (prevents `--print`, `--help`, etc.).
+/// - Must not start with `/` (rejects absolute paths).
+/// - No path component (split on `/`) may equal `..` (rejects traversal like
+///   `../../etc/passwd` or `../sibling`).
+/// - Every character must be in `[A-Za-z0-9._\-/ ]` (alphanumeric, dot,
+///   underscore, hyphen, forward-slash, and space are the only allowed chars).
+pub fn is_valid_sequence_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    if name.len() > 256 {
+        return false;
+    }
+    if name.starts_with('-') {
+        return false;
+    }
+    if name.starts_with('/') {
+        return false;
+    }
+    // Reject `..`, `.`, and empty segments (produced by leading/trailing/consecutive `/`).
+    if name.split('/').any(|seg| seg == ".." || seg == "." || seg.is_empty()) {
+        return false;
+    }
+    name.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || c == '.'
+            || c == '_'
+            || c == '-'
+            || c == '/'
+            || c == ' '
+    })
+}
+
 /// Launch a Claude CLI child process for the given project and sequence.
 ///
 /// Returns the initial `Run` (status = Pending) synchronously.  A background
@@ -575,6 +628,15 @@ pub async fn launch_run(
             .get_project_path(&input.project_id)
             .ok_or_else(|| AppError::NotFound(format!("project id: {}", input.project_id)))?
     };
+
+    // ── 1b. Validate sequence_name ────────────────────────────────────────────
+    if !is_valid_sequence_name(&input.sequence_name) {
+        return Err(AppError::InvalidInput(format!(
+            "sequence_name: invalid value {:?}. Must be non-empty, must not start with '-', \
+             and may only contain [A-Za-z0-9._\\-/ ]",
+            input.sequence_name
+        )));
+    }
 
     // ── 2. Generate and validate run id ──────────────────────────────────────
     let run_id = uuid::Uuid::now_v7().to_string();
@@ -635,10 +697,12 @@ pub async fn launch_run(
     // ── 8. Build session handle and register ──────────────────────────────────
     let cancel_token = CancellationToken::new();
     let run_arc = Arc::new(Mutex::new(initial_run.clone()));
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let handle = Arc::new(SessionHandle {
         cancel: cancel_token.clone(),
         stdin: Arc::new(Mutex::new(child_stdin)),
         run: run_arc.clone(),
+        input_tx,
     });
 
     let sessions = {
@@ -646,13 +710,19 @@ pub async fn launch_run(
         rm.sessions.clone()
     };
 
+    // ── 9. Insert handle into sessions map, then spawn background I/O task ───
+    // Insert BEFORE spawn so that run_io_loop's map.remove (Step 8) can never
+    // fire before the insert.  If the child exits instantly, run_io_loop's
+    // select! arm fires after this insert, finds and removes the key cleanly.
+    // Spawning after insert is safe because CancellationToken is already
+    // cancelled by the time stop_run could have fired it; the I/O task's first
+    // select! will detect the cancelled token immediately and kill the child.
     {
         let mut map = sessions.lock().await;
         map.insert(run_id.clone(), handle);
     }
 
-    // ── 9. Spawn background I/O task ──────────────────────────────────────────
-    tokio::task::spawn(crate::runs::session::run_io_loop(
+    let _ = tokio::task::spawn(crate::runs::session::run_io_loop(
         app_handle,
         run_id.clone(),
         run_arc,
@@ -661,7 +731,8 @@ pub async fn launch_run(
         child,
         writer,
         cancel_token,
-        sessions,
+        sessions.clone(),
+        input_rx,
     ));
 
     tracing::info!(
@@ -731,6 +802,24 @@ pub async fn send_input(
         Some(h) => h,
     };
 
+    // FIX-SEC-2: cap input size to prevent unbounded writes to child stdin.
+    const MAX_INPUT_BYTES: usize = 65_536; // 64 KiB
+    if text.len() > MAX_INPUT_BYTES {
+        return Err(AppError::InvalidInput(format!(
+            "send_input: text too large ({} bytes, max {})",
+            text.len(),
+            MAX_INPUT_BYTES
+        )));
+    }
+
+    // Send to the UserInput transcript channel.  If the channel is closed
+    // (I/O loop already exited), the run is no longer accepting input.
+    if handle.input_tx.send(text.clone()).is_err() {
+        return Err(AppError::InvalidInput(
+            "run is not accepting input".to_string(),
+        ));
+    }
+
     let mut stdin_guard = handle.stdin.lock().await;
     match stdin_guard.as_mut() {
         None => Err(AppError::InvalidInput(
@@ -749,6 +838,127 @@ pub async fn send_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // FIX-SEC-1 — is_valid_sequence_name
+    // -----------------------------------------------------------------------
+
+    /// Empty string must be rejected.
+    #[test]
+    fn is_valid_sequence_name_rejects_empty() {
+        assert!(!is_valid_sequence_name(""), "empty string must be rejected");
+    }
+
+    /// A bare leading dash must be rejected.
+    #[test]
+    fn launch_run_rejects_sequence_name_with_leading_dash() {
+        assert!(!is_valid_sequence_name("-"), "bare dash must be rejected");
+        assert!(!is_valid_sequence_name("--print"), "\"--print\" must be rejected");
+        assert!(!is_valid_sequence_name("--help"), "\"--help\" must be rejected");
+        assert!(!is_valid_sequence_name("-x"), "single-letter flag must be rejected");
+    }
+
+    /// Names that contain characters outside the allowlist must be rejected.
+    #[test]
+    fn is_valid_sequence_name_rejects_unsafe_characters() {
+        assert!(!is_valid_sequence_name("foo;bar"), "semicolon must be rejected");
+        assert!(!is_valid_sequence_name("foo&bar"), "ampersand must be rejected");
+        assert!(!is_valid_sequence_name("foo|bar"), "pipe must be rejected");
+        assert!(!is_valid_sequence_name("foo$bar"), "dollar sign must be rejected");
+        assert!(!is_valid_sequence_name("foo\nbar"), "newline must be rejected");
+        assert!(!is_valid_sequence_name("foo\x00bar"), "null byte must be rejected");
+    }
+
+    /// Valid names must be accepted.
+    #[test]
+    fn is_valid_sequence_name_accepts_valid_names() {
+        assert!(is_valid_sequence_name("my-sequence"), "hyphenated name must be accepted");
+        assert!(is_valid_sequence_name("sub/dir"), "forward-slash for subdir must be accepted");
+        assert!(is_valid_sequence_name("seq 1"), "space in name must be accepted");
+        assert!(is_valid_sequence_name("alpha.beta_gamma"), "dot and underscore must be accepted");
+        assert!(is_valid_sequence_name("MySequence"), "mixed case must be accepted");
+        assert!(is_valid_sequence_name("a"), "single char must be accepted");
+        assert!(is_valid_sequence_name("foo.bar"), "dot in name must be accepted");
+    }
+
+    /// Names containing `..` path components must be rejected (FIX-SEC-6).
+    #[test]
+    fn is_valid_sequence_name_rejects_dotdot_segments() {
+        assert!(!is_valid_sequence_name("../../etc/passwd"), "double-dot traversal must be rejected");
+        assert!(!is_valid_sequence_name("../sibling"), "leading double-dot segment must be rejected");
+        assert!(!is_valid_sequence_name("sub/../etc"), "double-dot in middle must be rejected");
+        assert!(!is_valid_sequence_name(".."), "bare double-dot must be rejected");
+    }
+
+    /// Single-dot segments and empty segments (trailing/consecutive slashes) must be rejected.
+    #[test]
+    fn is_valid_sequence_name_rejects_dot_and_empty_segments() {
+        assert!(!is_valid_sequence_name("."), "bare single-dot must be rejected");
+        assert!(!is_valid_sequence_name("./foo"), "leading dot-segment must be rejected");
+        assert!(!is_valid_sequence_name("foo/."), "trailing dot-segment must be rejected");
+        assert!(!is_valid_sequence_name("foo//bar"), "consecutive slashes must be rejected");
+        assert!(!is_valid_sequence_name("foo/"), "trailing slash must be rejected");
+    }
+
+    /// Names starting with `/` must be rejected as absolute paths (FIX-SEC-6).
+    #[test]
+    fn is_valid_sequence_name_rejects_absolute_path() {
+        assert!(!is_valid_sequence_name("/absolute"), "leading slash must be rejected");
+        assert!(!is_valid_sequence_name("/etc/passwd"), "absolute path must be rejected");
+        assert!(!is_valid_sequence_name("/"), "bare slash must be rejected");
+    }
+
+    /// Names longer than 256 characters must be rejected (FIX-SEC-6).
+    #[test]
+    fn is_valid_sequence_name_rejects_over_256_chars() {
+        let exactly_256 = "a".repeat(256);
+        assert!(
+            is_valid_sequence_name(&exactly_256),
+            "exactly 256 chars must be accepted"
+        );
+        let over_256 = "a".repeat(257);
+        assert!(
+            !is_valid_sequence_name(&over_256),
+            "257 chars must be rejected"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FIX-SEC-2 — send_input 64 KiB cap (guard predicate)
+    // -----------------------------------------------------------------------
+
+    /// Exactly 64 KiB must be accepted.
+    #[test]
+    fn send_input_size_guard_accepts_max_bytes() {
+        const MAX_INPUT_BYTES: usize = 65_536;
+        let text = "x".repeat(MAX_INPUT_BYTES);
+        assert!(
+            !(text.len() > MAX_INPUT_BYTES),
+            "exactly 64 KiB must be accepted by the guard"
+        );
+    }
+
+    /// One byte over the limit must be rejected.
+    #[test]
+    fn send_input_size_guard_rejects_over_max_bytes() {
+        const MAX_INPUT_BYTES: usize = 65_536;
+        let text = "x".repeat(MAX_INPUT_BYTES + 1);
+        assert!(
+            text.len() > MAX_INPUT_BYTES,
+            "65537 bytes must be rejected by the guard"
+        );
+    }
+
+    /// An empty string (0 bytes) must be accepted.
+    #[test]
+    fn send_input_size_guard_accepts_empty() {
+        const MAX_INPUT_BYTES: usize = 65_536;
+        let text = "";
+        assert!(
+            !(text.len() > MAX_INPUT_BYTES),
+            "empty string must be accepted by the guard"
+        );
+    }
 
     // -----------------------------------------------------------------------
     // T1.2-sec-fix — validate_cli_path

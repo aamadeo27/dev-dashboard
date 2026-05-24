@@ -18,6 +18,9 @@ pub struct SessionHandle {
     pub stdin: Arc<Mutex<Option<tokio::process::ChildStdin>>>,
     /// Mutable run state updated by the background I/O task.
     pub run: Arc<Mutex<Run>>,
+    /// Sender half of the UserInput channel.  `send_input` pushes text here so
+    /// the I/O loop can write a `UserInput` event to the transcript.
+    pub input_tx: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 /// Manages all active `RunSession` background tasks.

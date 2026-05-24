@@ -37,6 +37,24 @@ pub fn build_run_dir(project_path: &Path, run_id: &str) -> PathBuf {
     project_path.join(".claude").join("runs").join(run_id)
 }
 
+/// Resolve `..` components in a forward-slash-normalised path string without
+/// touching the filesystem.  Empty and `.` components are dropped; `..`
+/// components pop the last accumulated segment (no-op at the root).
+///
+/// This is applied to `run_dir` inside `verify_run_dir_prefix` so that a path
+/// like `<project>/.claude/runs/../../outside` cannot bypass the prefix check.
+fn normalize_path_lexically(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => { parts.pop(); }
+            p => parts.push(p),
+        }
+    }
+    parts.join("/")
+}
+
 /// Canonicalize `project_path` and verify that `run_dir` is rooted under
 /// `<canonical_project_path>/.claude/runs/`.
 ///
@@ -61,12 +79,15 @@ pub async fn verify_run_dir_prefix(project_path: &Path, run_dir: &Path) -> AppRe
         .into_owned();
 
     // run_dir may not exist yet (created by TranscriptWriter::create).
-    // We verify lexically after normalizing separators on Windows.
+    // Normalize Windows path separators, then collapse any `..` components
+    // lexically so a path like `<project>/.claude/runs/../../outside` cannot
+    // bypass the prefix check.
     let run_dir_str = run_dir.to_string_lossy().into_owned();
+    let run_dir_norm = normalize_path_lexically(&run_dir_str.replace('\\', "/"));
 
-    // Normalize Windows path separators for the prefix check.
-    let run_dir_norm = run_dir_str.replace('\\', "/");
-    let prefix_norm = expected_prefix.replace('\\', "/");
+    // Append a trailing "/" so that a sibling dir like `.claude/runs-evil/`
+    // cannot falsely pass as a prefix of `.claude/runs/`.
+    let prefix_norm = format!("{}/", expected_prefix.replace('\\', "/"));
 
     if !run_dir_norm.starts_with(&prefix_norm) {
         return Err(AppError::PermissionDenied(format!(
@@ -102,6 +123,7 @@ pub async fn run_io_loop(
     mut writer: TranscriptWriter,
     cancel: CancellationToken,
     sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
 ) {
     let span = tracing::info_span!("run_session", run_id = %run_id);
     let _enter = span.enter();
@@ -196,6 +218,23 @@ pub async fn run_io_loop(
                 }
             }
 
+            // UserInput channel — write to transcript and emit run:event.
+            maybe_text = input_rx.recv() => {
+                if let Some(text) = maybe_text {
+                    let event = super::RunEvent::UserInput {
+                        text,
+                        ts: chrono::Utc::now(),
+                    };
+                    if let Err(e) = writer.append_event(&event).await {
+                        tracing::warn!(run_id = %run_id, error = %e, "append_event UserInput failed");
+                    }
+                    let payload = serde_json::json!({ "run_id": run_id, "event": event });
+                    if let Err(e) = app_handle.emit(events::RUN_EVENT, payload) {
+                        tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:event UserInput");
+                    }
+                }
+            }
+
             // Cancellation.
             _ = cancel.cancelled() => {
                 cancelled = true;
@@ -209,43 +248,43 @@ pub async fn run_io_loop(
     }
 
     // ── Step 3: drain remaining output (best-effort, with short timeout) ────
+    // Always drain regardless of cancellation: the child may flush final output
+    // after kill() before the pipe closes.  The 200 ms timeout bounds this.
 
-    if !cancelled {
-        let drain_timeout = std::time::Duration::from_millis(200);
+    let drain_timeout = std::time::Duration::from_millis(200);
 
-        // Drain stdout.
-        let _ = tokio::time::timeout(drain_timeout, async {
-            loop {
-                match stdout.read(&mut stdout_buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let chunk = &stdout_buf[..n];
-                        let _ = writer.append_raw(chunk).await;
-                        let events_parsed = parser.feed(chunk);
-                        for event in &events_parsed {
-                            let _ = writer.append_event(event).await;
-                            let payload = serde_json::json!({ "run_id": run_id, "event": event });
-                            let _ = app_handle.emit(events::RUN_EVENT, payload);
-                        }
+    // Drain stdout.
+    let _ = tokio::time::timeout(drain_timeout, async {
+        loop {
+            match stdout.read(&mut stdout_buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let chunk = &stdout_buf[..n];
+                    let _ = writer.append_raw(chunk).await;
+                    let events_parsed = parser.feed(chunk);
+                    for event in &events_parsed {
+                        let _ = writer.append_event(event).await;
+                        let payload = serde_json::json!({ "run_id": run_id, "event": event });
+                        let _ = app_handle.emit(events::RUN_EVENT, payload);
                     }
                 }
             }
-        })
-        .await;
+        }
+    })
+    .await;
 
-        // Drain stderr.
-        let _ = tokio::time::timeout(drain_timeout, async {
-            loop {
-                match stderr.read(&mut stderr_buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let _ = writer.append_raw(&stderr_buf[..n]).await;
-                    }
+    // Drain stderr.
+    let _ = tokio::time::timeout(drain_timeout, async {
+        loop {
+            match stderr.read(&mut stderr_buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let _ = writer.append_raw(&stderr_buf[..n]).await;
                 }
             }
-        })
-        .await;
-    }
+        }
+    })
+    .await;
 
     // ── Step 4: wait for child exit ──────────────────────────────────────────
 
@@ -403,6 +442,192 @@ mod tests {
         assert!(
             matches!(result, Err(AppError::PermissionDenied(_))),
             "path outside project prefix must return PermissionDenied, got: {:?}",
+            result
+        );
+    }
+
+    // ── T4.3 gap tests ───────────────────────────────────────────────────────
+
+    /// All allowed punctuation characters (`.`, `_`, `-`) combined with
+    /// alphanumerics must be accepted.
+    ///
+    /// Covers the positive boundary that the existing UUID test (`[a-f0-9-]`)
+    /// does not exercise: upper-case letters, digits, dot, and underscore.
+    #[test]
+    fn validate_run_id_accepts_valid_chars() {
+        assert!(
+            validate_run_id("my.run_id-001"),
+            "alphanumerics + dot + underscore + hyphen must be accepted"
+        );
+        assert!(
+            validate_run_id("ABC"),
+            "upper-case letters must be accepted"
+        );
+        assert!(
+            validate_run_id("a"),
+            "single-char id must be accepted"
+        );
+        assert!(
+            validate_run_id("Z9.x_y-z"),
+            "mixed valid chars must be accepted"
+        );
+    }
+
+    /// A run_id containing a non-ASCII Unicode character must be rejected.
+    ///
+    /// `ü` is U+00FC — it passes `char::is_alphanumeric()` but fails
+    /// `char::is_ascii_alphanumeric()`, so this guards the correct predicate
+    /// is used.
+    #[test]
+    fn validate_run_id_rejects_unicode() {
+        assert!(
+            !validate_run_id("rün"),
+            "non-ASCII unicode character must be rejected"
+        );
+        assert!(
+            !validate_run_id("日本語"),
+            "CJK characters must be rejected"
+        );
+        assert!(
+            !validate_run_id("naïve"),
+            "latin-1 supplement must be rejected"
+        );
+    }
+
+    /// A run_id containing a null byte (`\0`) must be rejected.
+    ///
+    /// Null bytes are not printable ASCII and must never appear in a path
+    /// component; `is_ascii_alphanumeric()` already rejects them but this
+    /// test makes the intent explicit and guards against future refactors.
+    #[test]
+    fn validate_run_id_rejects_null_byte() {
+        assert!(
+            !validate_run_id("run\0id"),
+            "embedded null byte must be rejected"
+        );
+        assert!(
+            !validate_run_id("\0"),
+            "lone null byte must be rejected"
+        );
+    }
+
+    /// `build_run_dir` must embed the `.claude/runs/` segment between the
+    /// project root and the run id.
+    ///
+    /// This is a stronger assertion than `build_run_dir_constructs_correct_path`
+    /// (which only checks the suffix) — it also verifies the intermediate
+    /// components, ensuring the directory is nested under `.claude` then `runs`.
+    #[test]
+    fn build_run_dir_uses_claude_subdir() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let project_path = tmp.path();
+        let run_id = "test-run-42";
+
+        let result = build_run_dir(project_path, run_id);
+
+        // The path must contain `.claude` as a component.
+        let components: Vec<String> = result
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+
+        let claude_pos = components.iter().position(|c| c == ".claude");
+        assert!(
+            claude_pos.is_some(),
+            "path must contain '.claude' component, got components: {:?}",
+            components
+        );
+
+        let claude_pos = claude_pos.unwrap();
+
+        // `.claude` must be immediately followed by `runs`.
+        assert_eq!(
+            components.get(claude_pos + 1).map(|s| s.as_str()),
+            Some("runs"),
+            "'.claude' must be immediately followed by 'runs', components: {:?}",
+            components
+        );
+
+        // `runs` must be immediately followed by the run_id.
+        assert_eq!(
+            components.get(claude_pos + 2).map(|s| s.as_str()),
+            Some(run_id),
+            "'runs' must be immediately followed by the run_id, components: {:?}",
+            components
+        );
+    }
+
+    /// A path under `.claude/runs-evil/` (sibling of `.claude/runs/`) must be
+    /// rejected.  Without the trailing-slash fix the old `starts_with` check
+    /// would have falsely accepted this path because `runs-evil` has `runs` as
+    /// a prefix.
+    #[tokio::test]
+    async fn verify_run_dir_prefix_rejects_runs_sibling_dir() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let project_path = tmp.path();
+
+        // Construct a path that sits under `.claude/runs-evil/` — a sibling of
+        // the legitimate `.claude/runs/` directory.
+        let evil_run_dir = project_path.join(".claude").join("runs-evil").join("abc");
+        let result = verify_run_dir_prefix(project_path, &evil_run_dir).await;
+
+        assert!(
+            matches!(result, Err(AppError::PermissionDenied(_))),
+            "path under .claude/runs-evil/ must be rejected with PermissionDenied, got: {:?}",
+            result
+        );
+    }
+
+    /// A `run_dir` containing `../..` that escapes the project must be rejected
+    /// even though the string contains the runs prefix as a substring (FIX-SEC-7).
+    ///
+    /// The path `<project>/.claude/runs/../../outside` resolves to
+    /// `<project>/outside` after lexical normalisation — clearly outside the
+    /// expected prefix.
+    #[tokio::test]
+    async fn verify_run_dir_prefix_rejects_dotdot_in_run_dir() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let project_path = tmp.path();
+
+        // Craft a path that starts inside .claude/runs/ but then escapes with ../..
+        let dotdot_run_dir = project_path
+            .join(".claude")
+            .join("runs")
+            .join("..")
+            .join("..")
+            .join("outside");
+
+        let result = verify_run_dir_prefix(project_path, &dotdot_run_dir).await;
+        assert!(
+            matches!(result, Err(AppError::PermissionDenied(_))),
+            "run_dir with .. escape must return PermissionDenied, got: {:?}",
+            result
+        );
+    }
+
+    /// A run_dir under a *different* project directory (sibling) must be
+    /// rejected even though it would pass a non-canonical prefix check.
+    ///
+    /// Two separate `TempDir`s are created (A and B).  The `run_dir` is
+    /// constructed under B.  When `verify_run_dir_prefix` is called with
+    /// project_path = A, it must return `PermissionDenied`.
+    ///
+    /// This covers the security boundary that the traversal test cannot
+    /// exercise: the path is syntactically valid but belongs to the wrong tree.
+    #[tokio::test]
+    async fn verify_run_dir_prefix_rejects_sibling_project() {
+        let tmp_a = tempfile::TempDir::new().expect("tempdir A");
+        let tmp_b = tempfile::TempDir::new().expect("tempdir B");
+
+        let project_path_a = tmp_a.path();
+        // Build a run_dir that is legitimately under B, not A.
+        let run_dir_under_b = build_run_dir(tmp_b.path(), "run-under-b");
+
+        let result = verify_run_dir_prefix(project_path_a, &run_dir_under_b).await;
+
+        assert!(
+            matches!(result, Err(AppError::PermissionDenied(_))),
+            "run_dir under a sibling project must be rejected with PermissionDenied, got: {:?}",
             result
         );
     }
