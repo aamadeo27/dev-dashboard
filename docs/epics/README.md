@@ -17,8 +17,8 @@
 |---|---|
 | [epic-0-bootstrap.md](epic-0-bootstrap.md) | Epic 0 — Project Bootstrap and Plumbing |
 | [epic-1-settings-cli.md](epic-1-settings-cli.md) | Epic 1 — Settings and CLI Detection |
-| [epic-2-project-registry-git.md](epic-2-project-registry-git.md) | Epic 2 — Project Registry and Git Status |
-| [epic-3-sequences.md](epic-3-sequences.md) | Epic 3 — Sequences |
+| [epic-2-project-registry-git.md](epic-2-project-registry-git.md) | Epic 2 — Project Registry and Git Status ✓ done |
+| [epic-3-sequences.md](epic-3-sequences.md) | Epic 3 — Sequences ✓ done |
 | [epic-4-run-execution.md](epic-4-run-execution.md) | Epic 4 — Run Execution Core |
 | [epic-5-run-ui.md](epic-5-run-ui.md) | Epic 5 — Run UI (Live and Historical) |
 | [epic-6-toasts.md](epic-6-toasts.md) | Epic 6 — Toasts and Notifications |
