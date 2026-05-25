@@ -101,32 +101,52 @@ If your invocation includes `worktree=<path>`, you are running in a git worktree
 
 ## Task doc
 
-Write a slim doc. **No fluff, no filler, no marketing language.** If a section has nothing notable, omit it.
+Write a slim doc. **Hard caps below are enforced — exceed them and your output will be rejected and rewritten.**
 
 - Location: `docs/tasks/<task-id>.md`
-- Sections:
 
-  - **What was done**: brief description with light commentary. Keep it short.
+### Sections (in this order, each optional except "What was done")
 
-  - **How it works** (optional): include **only if non-obvious**. One or two sentences. If the code is self-explanatory, skip this section entirely. Never walk through data flow line by line.
+- **What was done**
+  - Cap: **≤3 sentences**. Plain prose. Light commentary OK.
 
-  - **Decisions**: one-liner each. No reasoning paragraphs, no "we considered X but chose Y because…" — just the decision. Skip the section if no notable choices were made.
+- **How it works** (default: omit)
+  - Cap: **0 or 1 sentence**. Default is to omit the section entirely.
+  - Include the one sentence only if the code is genuinely non-obvious.
 
-- **Do NOT include**:
-  - "Files touched" — reviewers and testers use `git diff --name-only` / `git show --stat`.
-  - "How to test/verify" — tests document this; CI runs them.
-  - Restating obvious code, full code blocks, marketing language.
+- **Decisions** (omit if no notable decisions)
+  - Bulleted list. Each item: **≤15 words**.
+  - State only the decision. Drop "because" clauses if they push past the cap.
+
+### Hard forbidden in the entire Task doc
+
+- Code blocks (` ``` `). The commit and the code carry these.
+- Tables (`| ... |`). Use plain bullets.
+- Headings deeper than H2 (`##`), except the per-iteration `### Iteration <n> fixes` heading.
+- `**Rationale:**`, `**Change:**`, or any "Rationale" / "Change" sub-block per decision.
+- Data flow diagrams, ASCII art, step-by-step pseudocode walkthroughs.
+- Sub-section headers within a section (no `### Data flow`, no `### Error handling`, no `### Conservative kill rule`, etc.).
+- "Files touched" — reviewers and testers use `git diff --name-only` / `git show --stat`.
+- "How to test / verify" — tests document this; CI runs them.
+- Marketing language ("robust", "comprehensive", "elegantly handles", etc.).
+- Restating obvious code.
 
 ### Fix-pass appends
 
-When invoked in Fix-pass mode, append a brief block to the Task doc, **not** a long writeup:
+When invoked in Fix-pass mode, append a small block:
 
 ```
 ### Iteration <n> fixes
-<one short line per finding addressed, e.g. "F-3: switched to async tokio::fs">
+- <finding-id>: <≤20 words on what changed>
+- <finding-id>: <≤20 words on what changed>
 ```
 
-No multi-sentence explanations. Commit message carries the detail.
+Hard rules for the append:
+- One bullet per finding. **Cap ≤20 words per bullet.**
+- **No** `**Change:**` / `**Rationale:**` blocks.
+- **No** code blocks.
+- **No** sub-headings.
+- Commit message carries the detail.
 
 ## Logging
 

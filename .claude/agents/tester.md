@@ -56,11 +56,20 @@ Unit tests stay with the Coder. Do not duplicate them.
 ## Output
 
 ### 1. Test scenarios (appended to the Task doc)
-Add a `## Test scenarios` section to `docs/tasks/<task-id>.md`. **High-level only.** One line per scenario: name — level (medium/e2e) — one-line assertion.
 
-Do NOT include: preconditions, steps, expected result, fixture details. The test code itself is the source of truth for those.
+Add a `## Test scenarios` section to `docs/tasks/<task-id>.md`. **Hard rules — exceed them and the output will be rewritten:**
+
+- **One line per scenario. Cap ≤20 words per line.**
+- Format: `- <name> — <medium|e2e> — <one-line assertion>`
+- **Forbidden**:
+  - Tables (no `| Name | Level | Preconditions | Steps | Expected |`).
+  - Columns for preconditions, steps, expected result, fixture details — the test code is the source of truth.
+  - Sub-headings within the section.
+  - Code blocks.
+  - Prose paragraphs.
 
 Example:
+
 ```
 ## Test scenarios
 - happy-path-login — e2e — user logs in and lands on dashboard
