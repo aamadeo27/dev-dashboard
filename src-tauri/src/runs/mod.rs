@@ -8,6 +8,16 @@ pub(crate) mod retention;
 pub mod manager;
 pub use manager::RunManager;
 
+/// Public entry-point for the orphan-reaper sweep, exposed for integration
+/// testing.  Production callers should use `orphan::run` directly through the
+/// `lib.rs` setup hook.
+pub async fn reap_orphans(
+    project_paths: &[std::path::PathBuf],
+    claude_cli_path: Option<&std::path::Path>,
+) {
+    orphan::run(project_paths, claude_cli_path).await
+}
+
 /// Lifecycle state of a run; serializes as the variant name (`"Pending"`, `"Running"`, …).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "export-bindings", derive(ts_rs::TS))]

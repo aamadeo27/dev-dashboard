@@ -101,16 +101,32 @@ If your invocation includes `worktree=<path>`, you are running in a git worktree
 
 ## Task doc
 
-For every Task, write a doc. Detailed enough to onboard a new agent or human, not over-explained.
+Write a slim doc. **No fluff, no filler, no marketing language.** If a section has nothing notable, omit it.
 
-- Location: alongside the project docs, named after the Task id (e.g., `docs/tasks/<task-id>.md`)
-- Include:
-  - **What was done**: short description of the change
-  - **How the affected component works**: data flow, key functions, contracts, side effects
-  - **Files touched**: list with one-line purpose each
-  - **Decisions made within Task scope**: small choices you made that stayed within your lane
-  - **How to test / verify**: commands or steps
-- Skip: line-by-line code walkthroughs, restating obvious code, marketing language
+- Location: `docs/tasks/<task-id>.md`
+- Sections:
+
+  - **What was done**: brief description with light commentary. Keep it short.
+
+  - **How it works** (optional): include **only if non-obvious**. One or two sentences. If the code is self-explanatory, skip this section entirely. Never walk through data flow line by line.
+
+  - **Decisions**: one-liner each. No reasoning paragraphs, no "we considered X but chose Y because…" — just the decision. Skip the section if no notable choices were made.
+
+- **Do NOT include**:
+  - "Files touched" — reviewers and testers use `git diff --name-only` / `git show --stat`.
+  - "How to test/verify" — tests document this; CI runs them.
+  - Restating obvious code, full code blocks, marketing language.
+
+### Fix-pass appends
+
+When invoked in Fix-pass mode, append a brief block to the Task doc, **not** a long writeup:
+
+```
+### Iteration <n> fixes
+<one short line per finding addressed, e.g. "F-3: switched to async tokio::fs">
+```
+
+No multi-sentence explanations. Commit message carries the detail.
 
 ## Logging
 
