@@ -27,6 +27,10 @@ use tempfile::TempDir;
 
 /// Write a `meta.json` with the given status and `started_at` offset in days
 /// from now (positive = days ago).  Creates parent dirs.
+///
+/// Note: mirrors the inline helpers in retention.rs unit tests. Kept separate
+/// because integration tests live in a different crate and cannot access
+/// `#[cfg(test)]` helpers from the library crate.
 fn write_meta(run_dir: &Path, id: &str, status: RunStatus, days_ago: i64) {
     std::fs::create_dir_all(run_dir).expect("create run_dir");
     let started_at = chrono::Utc::now() - chrono::Duration::days(days_ago);
@@ -49,6 +53,8 @@ fn write_meta(run_dir: &Path, id: &str, status: RunStatus, days_ago: i64) {
 
 /// Write a file of exactly `size_bytes` zero bytes into `run_dir` to control
 /// the measured directory size.
+///
+/// Note: mirrors the inline helpers in retention.rs unit tests.
 fn write_data_file(run_dir: &Path, filename: &str, size_bytes: usize) {
     let data = vec![0u8; size_bytes];
     std::fs::write(run_dir.join(filename), data).expect("write data file");

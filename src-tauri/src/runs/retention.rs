@@ -45,7 +45,7 @@ pub async fn run(project_paths: &[PathBuf], retention_days: u32, retention_size_
     let size_cap_bytes: u64 = retention_size_mb as u64 * 1024 * 1024;
 
     let mut total_pruned: u32 = 0;
-    let projects_processed = project_paths.len();
+    let projects_total = project_paths.len();
 
     for project_path in project_paths {
         let pruned = prune_project(project_path, cutoff, size_cap_bytes).await;
@@ -55,15 +55,16 @@ pub async fn run(project_paths: &[PathBuf], retention_days: u32, retention_size_
     tracing::info!(
         component = "retention_pruner",
         total_pruned,
-        projects_processed,
+        projects_total,
         "retention pruner finished"
     );
 }
 
 /// Spawn the 24-hour background timer loop that repeatedly calls `run`.
 pub async fn start(app_handle: tauri::AppHandle) {
-    tokio::spawn(async move {
+    let _ = tokio::spawn(async move {
         loop {
+            // sleep first: startup sweep already ran; first periodic sweep fires 24 h later.
             tokio::time::sleep(tokio::time::Duration::from_secs(86_400)).await;
 
             let (project_paths, retention_days, retention_size_mb) = {
@@ -100,6 +101,7 @@ async fn prune_project(project_path: &Path, cutoff: chrono::DateTime<Utc>, size_
     // Collect terminal-state run candidates.
     let mut candidates = match collect_terminal_runs(&runs_dir).await {
         Some(v) => v,
+        // warn already emitted in collect_terminal_runs; skip project.
         None => return 0,
     };
 
@@ -123,7 +125,7 @@ async fn prune_project(project_path: &Path, cutoff: chrono::DateTime<Utc>, size_
 
     // ── Size pruning ─────────────────────────────────────────────────────────
     // Compute total size of remaining runs; delete oldest first until under cap.
-    let mut total_size: u64 = compute_total_size(&remaining).await;
+    let mut total_size: u64 = compute_total_size(&remaining);
 
     // `remaining` is already sorted oldest-first; iterate by index so we can pop.
     let mut idx = 0;
@@ -253,6 +255,10 @@ async fn read_meta(meta_path: &Path) -> Option<Run> {
 
 /// Sum the file sizes of all direct children of `run_dir`.
 /// Unreadable entries contribute 0 (conservative: don't delete on partial failure).
+///
+/// Run directories are guaranteed to be flat by the contracts (TranscriptWriter
+/// creates only `meta.json`, `transcript.jsonl`, and `raw.log` — all top-level
+/// files; see `docs/kb/contracts/run-event.md`). No recursive walk is needed.
 async fn measure_dir_size(run_dir: &Path) -> u64 {
     let mut total: u64 = 0;
 
@@ -279,7 +285,7 @@ async fn measure_dir_size(run_dir: &Path) -> u64 {
 }
 
 /// Sum `dir_size` for every candidate in the slice.
-async fn compute_total_size(candidates: &[RunCandidate]) -> u64 {
+fn compute_total_size(candidates: &[RunCandidate]) -> u64 {
     candidates.iter().map(|c| c.dir_size).sum()
 }
 
