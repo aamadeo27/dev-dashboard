@@ -609,11 +609,54 @@ pub fn is_valid_sequence_name(name: &str) -> bool {
     })
 }
 
+/// Read the contents of an attached Markdown file, enforcing a 1 MiB size cap.
+///
+/// Returns `AppError::NotFound` if the path does not exist or cannot be read,
+/// so that `launch_run` can abort before spawning the child process.
+/// Returns `AppError::InvalidInput` if the file exceeds `MAX_ATTACHED_MD_BYTES`.
+///
+/// The 1 MiB cap is a safety bound: the Claude CLI receives this content via
+/// stdin before the sequence prompt, and an unbounded file could exhaust memory
+/// or cause the child to stall on a massive write.
+pub async fn read_attached_md(path: &std::path::Path) -> AppResult<Vec<u8>> {
+    const MAX_ATTACHED_MD_BYTES: u64 = 1_048_576; // 1 MiB
+
+    // Probe existence and size before reading — gives a precise error message.
+    let meta = tokio::fs::metadata(path).await.map_err(|e| {
+        AppError::NotFound(format!(
+            "attached_md_path '{}' not found or not accessible: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    if meta.len() > MAX_ATTACHED_MD_BYTES {
+        return Err(AppError::InvalidInput(format!(
+            "attached_md_path '{}' is too large ({} bytes, max {} bytes)",
+            path.display(),
+            meta.len(),
+            MAX_ATTACHED_MD_BYTES
+        )));
+    }
+
+    tokio::fs::read(path).await.map_err(|e| {
+        AppError::NotFound(format!(
+            "attached_md_path '{}' could not be read: {}",
+            path.display(),
+            e
+        ))
+    })
+}
+
 /// Launch a Claude CLI child process for the given project and sequence.
 ///
 /// Returns the initial `Run` (status = Pending) synchronously.  A background
 /// Tokio task then updates the status to `Running` and starts streaming events
 /// to the frontend via `run:started`, `run:event`, and `run:finished`.
+///
+/// If `input.attached_md_path` is set, its contents are prepended to the
+/// first stdin write (before any sequence prompt) and the path is recorded
+/// in `meta.json` as part of the `Run` record.
 #[tauri::command]
 pub async fn launch_run(
     input: LaunchInput,
@@ -636,6 +679,21 @@ pub async fn launch_run(
             input.sequence_name
         )));
     }
+
+    // ── 1c. Read attached_md_path eagerly (before any side effects) ────────────
+    // Fail with NotFound before spawning the child or creating the run directory,
+    // so the caller sees a clean error with no partial state written to disk.
+    let attached_md_content: Option<Vec<u8>> = if let Some(ref md_path) = input.attached_md_path {
+        tracing::info!(
+            project_id = %input.project_id,
+            attached_md_path = ?md_path,
+            "launch_run: reading attached_md_path"
+        );
+        let content = read_attached_md(md_path).await?;
+        Some(content)
+    } else {
+        None
+    };
 
     // ── 2. Generate and validate run id ──────────────────────────────────────
     let run_id = uuid::Uuid::now_v7().to_string();
@@ -685,13 +743,45 @@ pub async fn launch_run(
 
     let mut child = cmd.spawn().map_err(AppError::Io)?;
 
-    let child_stdin = child.stdin.take();
+    let mut child_stdin = child.stdin.take();
     let child_stdout = child.stdout.take().ok_or_else(|| {
         AppError::Internal("child stdout handle missing after spawn".to_string())
     })?;
     let child_stderr = child.stderr.take().ok_or_else(|| {
         AppError::Internal("child stderr handle missing after spawn".to_string())
     })?;
+
+    // ── 7b. Write attached_md content to child stdin (first write) ─────────────
+    // The content was read and validated before spawn (step 1c).  Writing it here,
+    // before the session handle is built, ensures the child receives the context
+    // before any subsequent `send_input` calls.  A trailing newline separates the
+    // context from the sequence prompt that follows.
+    // Empty content is skipped — writing only a lone newline may confuse the CLI.
+    if let Some(ref content) = attached_md_content {
+        if !content.is_empty() {
+            if let Some(ref mut stdin) = child_stdin {
+                if let Err(e) = stdin.write_all(content).await {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        error = %e,
+                        "launch_run: failed to write attached_md to stdin; continuing"
+                    );
+                } else if let Err(e) = stdin.write_all(b"\n").await {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        error = %e,
+                        "launch_run: failed to write attached_md newline to stdin; continuing"
+                    );
+                } else {
+                    tracing::info!(
+                        run_id = %run_id,
+                        bytes = content.len(),
+                        "launch_run: wrote attached_md to stdin"
+                    );
+                }
+            }
+        }
+    }
 
     // ── 8. Build session handle and register ──────────────────────────────────
     let cancel_token = CancellationToken::new();
@@ -1130,6 +1220,105 @@ mod tests {
         ];
         let any_too_long = ids.iter().any(|id| id.len() > 128);
         assert!(!any_too_long, "short ids must all be accepted");
+    }
+
+    // -----------------------------------------------------------------------
+    // T4.4 — read_attached_md
+    // -----------------------------------------------------------------------
+
+    /// A file that exists and is within the 1 MiB limit must be read successfully.
+    #[tokio::test]
+    async fn read_attached_md_reads_existing_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("context.md");
+        let content = b"# Context\n\nThis is the attached context.\n";
+        tokio::fs::write(&path, content).await.expect("write test file");
+
+        let result = read_attached_md(&path).await;
+        assert!(result.is_ok(), "existing file must be readable: {:?}", result);
+        assert_eq!(result.unwrap(), content, "content must match exactly");
+    }
+
+    /// A path that does not exist must return AppError::NotFound.
+    #[tokio::test]
+    async fn read_attached_md_returns_not_found_for_missing_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("nonexistent_context.md");
+
+        let result = read_attached_md(&path).await;
+        assert!(
+            matches!(result, Err(AppError::NotFound(_))),
+            "missing file must return NotFound, got: {:?}",
+            result
+        );
+    }
+
+    /// A file whose content exceeds 1 MiB must return AppError::InvalidInput.
+    #[tokio::test]
+    async fn read_attached_md_rejects_oversized_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("big.md");
+
+        // Write exactly 1 MiB + 1 byte so it exceeds the cap.
+        const LIMIT: usize = 1_048_576;
+        let big = vec![b'x'; LIMIT + 1];
+        tokio::fs::write(&path, &big).await.expect("write big file");
+
+        let result = read_attached_md(&path).await;
+        assert!(
+            matches!(result, Err(AppError::InvalidInput(_))),
+            "oversized file must return InvalidInput, got: {:?}",
+            result
+        );
+    }
+
+    /// A file at exactly the 1 MiB boundary must be accepted.
+    #[tokio::test]
+    async fn read_attached_md_accepts_file_at_exact_limit() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("exact_limit.md");
+
+        const LIMIT: usize = 1_048_576;
+        let exact = vec![b'a'; LIMIT];
+        tokio::fs::write(&path, &exact).await.expect("write limit file");
+
+        let result = read_attached_md(&path).await;
+        assert!(
+            result.is_ok(),
+            "file at exactly 1 MiB must be accepted: {:?}",
+            result
+        );
+        assert_eq!(result.unwrap().len(), LIMIT);
+    }
+
+    /// An empty file (0 bytes) must be accepted and return an empty Vec.
+    #[tokio::test]
+    async fn read_attached_md_accepts_empty_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("empty.md");
+        tokio::fs::write(&path, b"").await.expect("write empty file");
+
+        let result = read_attached_md(&path).await;
+        assert!(result.is_ok(), "empty file must be accepted: {:?}", result);
+        assert!(result.unwrap().is_empty(), "result must be empty Vec");
+    }
+
+    /// The error message for a missing file must mention the path.
+    #[tokio::test]
+    async fn read_attached_md_not_found_message_contains_path() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("missing_context.md");
+
+        let result = read_attached_md(&path).await;
+        match result {
+            Err(AppError::NotFound(msg)) => {
+                assert!(
+                    msg.contains("missing_context.md"),
+                    "NotFound message must contain the filename, got: {msg}"
+                );
+            }
+            other => panic!("expected NotFound, got: {:?}", other),
+        }
     }
 
     // -----------------------------------------------------------------------
