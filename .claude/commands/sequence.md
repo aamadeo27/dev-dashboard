@@ -131,23 +131,62 @@ Never use `git merge -X ours` or `-X theirs` blindly — those drop changes sile
 
 ## Subagent prompt construction
 
-How you build the prompt for each Task tool invocation directly affects token cost and cache hit rate. Follow these three rules:
+How you build the prompt for each Task tool invocation directly affects token cost and cache hit rate. The prompt is built in **three nested layers**, ordered most-stable → least-stable, so each layer caches at its own scope.
 
-1. **Pass file paths, not content.** Do not inline the Knowledge Base, Task docs, findings, UI/UX specs, or any other persistent doc into the prompt. Pass the path; the agent will Read what it needs. Inlined content burns input tokens every call and defeats prompt caching.
-   - Bad: `Here is the KB: <2KB blob>...`
-   - Good: `Read docs/kb/index.md and the patterns/contracts entries relevant to your Task.`
+### Layer A — agent-stable (cached across all calls to this agent type)
 
-2. **Do not re-state the agent's own rules.** Each agent's `.md` body is already its system prompt — it knows its lane, output format, and process. Your user prompt should only carry the **inputs** for this invocation (Task id, paths, mode, tech-decision mode, etc.) — not a restatement of what the agent does.
-   - Bad: `You are the Coder. Implement only the assigned Task. Stay in scope. Read the KB...`
-   - Good: `Task: T2.5. Mode: fix-pass. Findings: docs/tasks/T2.5-findings.md. Task doc: docs/tasks/T2.5.md.`
+Same content every time you call this agent type, regardless of Task. **Inline content**, not refs, for the small mandatories. Order matters — keep this exact order across all invocations.
 
-3. **Stable prefix, variable tail.** Build every Task prompt in this fixed order so the Anthropic prompt cache hits across invocations:
-   1. **Role + mode line** (e.g., `task=T2.5 mode=fix-pass iteration=3`)
-   2. **Static input paths block** (KB pointer, Task doc path, findings path, UI/UX spec path) — same shape every call
-   3. **Sequence context** (sequence name, current phase) — same shape every call
-   4. **Variable delta** (this iteration's specific instruction, e.g., "address findings F-3 and F-7") — at the end
+Per agent:
 
-   Putting the variable part last keeps the prefix stable, which lets the cache match across iterations and across tasks within the same Epic.
+- **Coder**:
+  - Line: `agent=coder`
+  - Inline: `docs/kb/README.md` (full)
+  - Inline: `docs/kb/common-pitfalls.md` (full)
+
+- **Tester**:
+  - Line: `agent=tester`
+  - Inline: `docs/kb/README.md`
+  - Inline: `docs/kb/common-pitfalls.md`
+  - Inline: `docs/kb/conventions/testing.md` (the project's testing conventions item — same across every Task)
+
+- **basic-reviewer**:
+  - Line: `agent=basic-reviewer`
+  - Inline: `docs/kb/README.md`
+  - Inline: `docs/kb/common-pitfalls.md`
+
+- **performance-reviewer** / **security-reviewer** (Epic-end only):
+  - Line: `agent=<name>`
+  - Inline: `docs/kb/README.md`
+
+- Other agents (architects, devops, ui-ux, monitor, kb-curator, requirement engineers): no Layer A inlining — they're called rarely enough that the cache benefit doesn't outweigh the prompt bloat. Stay on refs.
+
+### Layer B — task-stable (cached across all iterations of one Task)
+
+Same across iterations within a Task, varies between Tasks. Order:
+
+- IDs: `task=<id>  epic=<id>  worktree=<abs-path>  log_file=<abs-path>`
+- Inline: the **Task entry block** from `docs/epics/<epic>-<slug>.md` (just the Task's own section — small, xs)
+- `kb-refs:` as a block (paths/slugs, not content — content stays on disk; the agent Reads what it needs)
+- `tech-decision-mode=<autonomous|user>` if relevant
+- For reviewers: `diff_patch=<path>`, `changed_files=<path>` (paths only — diff changes per iteration so it's not actually fully stable, but it's path-stable in shape)
+
+### Layer C — iteration-variable (fresh every call)
+
+- `mode=<fresh|fix-pass>` (Coder)
+- `pass=<initial|re-review>` (Reviewer)
+- `iteration=<n>`
+- `findings_file=<path>` (Coder fix-pass only — file content varies; path is xs but the file Read is fresh)
+- Instruction line — one sentence: "Implement Task X." / "Apply review iteration N fixes from <findings>." / "Review the diff."
+
+### Rules of construction
+
+1. **Layer order matters.** A → B → C, every time. Reordering breaks the cache.
+2. **Never re-state the agent's rules.** The agent `.md` body is already the system prompt.
+3. **Layer A content is inlined.** Layer B mostly refs (with the small Task entry inlined). Layer C is short paths + one instruction line.
+4. **Refs over inlines for everything in Layer B/C that isn't xs-size.** kb-refs items stay on disk; Coder Reads them.
+5. **Within 5-minute TTL**, iteration N+1 hits Layer A + B cache. Only Layer C re-tokenizes. This is the win — Coder/Reviewer per-iteration cost drops sharply.
+6. If a Layer A inlined file changes (e.g., kb-curator updated `common-pitfalls.md`), the cache invalidates for the next call. Expected; not a problem.
 
 ## Logging
 
