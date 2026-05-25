@@ -94,6 +94,29 @@ pub fn run() {
                     .map_err(|e| format!("orphan reaper join error: {}", e))?;
             }
 
+            // ── RetentionPruner startup sweep (T4.6) — fire-and-forget ──────
+            // Best-effort: pruning is not startup-critical so we do not block.
+            {
+                let settings = app.state::<AppState>().settings.clone();
+                let projects = app.state::<AppState>().projects.clone();
+                tauri::async_runtime::spawn(async move {
+                    let project_paths: Vec<std::path::PathBuf> = {
+                        let projects_guard = projects.lock().await;
+                        let list = projects_guard.list_projects().await;
+                        list.into_iter().map(|p| p.path).collect()
+                    };
+                    let (retention_days, retention_size_mb) = {
+                        let settings_guard = settings.lock().await;
+                        let s = settings_guard.settings();
+                        (s.retention_days, s.retention_size_mb)
+                    };
+                    runs::retention::run(&project_paths, retention_days, retention_size_mb).await;
+                });
+            }
+
+            // ── RetentionPruner 24h timer (T4.6) ─────────────────────────────
+            tauri::async_runtime::spawn(runs::retention::start(app.handle().clone()));
+
             // Start the background CLI-loss watcher (T1.6).
             // manage() has already run so app.state() is available here.
             let settings = app.state::<AppState>().settings.clone();
