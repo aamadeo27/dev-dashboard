@@ -8,6 +8,17 @@ pub(crate) mod retention;
 pub mod manager;
 pub use manager::RunManager;
 
+/// Public entry-point for the retention pruner sweep, exposed for integration
+/// testing.  Production callers should use `retention::run` directly through
+/// the `lib.rs` setup hook.
+pub async fn prune_runs(
+    project_paths: &[std::path::PathBuf],
+    retention_days: u32,
+    retention_size_mb: u32,
+) {
+    retention::run(project_paths, retention_days, retention_size_mb).await
+}
+
 /// Public entry-point for the orphan-reaper sweep, exposed for integration
 /// testing.  Production callers should use `orphan::run` directly through the
 /// `lib.rs` setup hook.
