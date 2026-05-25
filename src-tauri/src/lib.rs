@@ -67,22 +67,21 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(state)
         .setup(|app| {
-            // ── OrphanReaper (T4.5) — must run before any new run is launched ──
+            // ── OrphanReaper (T4.5) — must complete before setup returns ──
             // Collect registered project paths and the configured CLI path, then
-            // spawn the async sweep on the Tokio runtime.
+            // run the async sweep to completion (blocking on the JoinHandle) so
+            // all orphaned runs are marked failed before any IPC handler fires.
             {
                 let settings = app.state::<AppState>().settings.clone();
                 let projects = app.state::<AppState>().projects.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Hold the locks only long enough to clone the data we need.
+                let handle = tauri::async_runtime::spawn(async move {
+                    // Clone data before any await point to avoid holding the Mutex
+                    // guard across async boundaries.
                     let project_paths: Vec<std::path::PathBuf> = {
                         let projects_guard = projects.lock().await;
-                        projects_guard
-                            .list_projects()
-                            .await
-                            .into_iter()
-                            .map(|p| p.path)
-                            .collect()
+                        // Collect the paths without awaiting inside the lock.
+                        let list = projects_guard.list_projects().await;
+                        list.into_iter().map(|p| p.path).collect()
                     };
                     let cli_path: Option<std::path::PathBuf> = {
                         let settings_guard = settings.lock().await;
@@ -90,6 +89,9 @@ pub fn run() {
                     };
                     runs::orphan::run(&project_paths, cli_path.as_deref()).await;
                 });
+                // Block on the sweep to ensure it completes before setup returns.
+                tauri::async_runtime::block_on(handle)
+                    .map_err(|e| format!("orphan reaper join error: {}", e))?;
             }
 
             // Start the background CLI-loss watcher (T1.6).

@@ -17,6 +17,9 @@ use sysinfo::{Pid, System};
 
 use super::{Run, RunStatus};
 
+/// The note string used to mark runs killed by the orphan reaper on restart.
+const ORPHAN_NOTE: &str = "Terminated (app restarted)";
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -266,7 +269,7 @@ fn maybe_kill_pid(pid: u32, claude_cli_path: Option<&Path>, system: &System, run
 async fn mark_failed(meta_path: &Path, mut run: Run) {
     run.status = RunStatus::Failed;
     run.ended_at = Some(Utc::now());
-    run.note = Some("Terminated (app restarted)".to_string());
+    run.note = Some(ORPHAN_NOTE.to_string());
 
     let pretty = match serde_json::to_string_pretty(&run) {
         Ok(j) => j,
@@ -330,7 +333,7 @@ async fn mark_failed(meta_path: &Path, mut run: Run) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -339,7 +342,7 @@ pub(crate) mod tests {
 
     /// Write a minimal `meta.json` with the given status and optional PID
     /// into `<run_dir>/meta.json`.  Creates parent dirs.
-    pub(crate) fn write_meta(run_dir: &Path, id: &str, status: RunStatus, pid: Option<u32>) {
+    fn write_meta(run_dir: &Path, id: &str, status: RunStatus, pid: Option<u32>) {
         std::fs::create_dir_all(run_dir).expect("create run_dir");
         let run = Run {
             id: id.to_string(),
@@ -359,7 +362,7 @@ pub(crate) mod tests {
     }
 
     /// Read `meta.json` back from disk and deserialize.
-    pub(crate) fn read_meta_sync(run_dir: &Path) -> Run {
+    fn read_meta_sync(run_dir: &Path) -> Run {
         let bytes = std::fs::read(run_dir.join("meta.json")).expect("read meta.json");
         serde_json::from_slice(&bytes).expect("parse meta.json")
     }
@@ -411,7 +414,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             meta.note.as_deref(),
-            Some("Terminated (app restarted)"),
+            Some(ORPHAN_NOTE),
             "note must be the orphan sentinel"
         );
         assert!(
@@ -436,7 +439,7 @@ pub(crate) mod tests {
             matches!(meta.status, RunStatus::Failed),
             "Running run must be marked Failed"
         );
-        assert_eq!(meta.note.as_deref(), Some("Terminated (app restarted)"));
+        assert_eq!(meta.note.as_deref(), Some(ORPHAN_NOTE));
     }
 
     // ── Test 4: runs dir does not exist → no panic ───────────────────────────
@@ -521,10 +524,17 @@ pub(crate) mod tests {
     }
 
     // ── Test 9: maybe_kill_pid — None cli_path → false ───────────────────────
-
+    //
+    // This test uses PID 1 (the init process, always present on Unix) on a
+    // refreshed system snapshot. The test verifies that when cli_path is None,
+    // the function returns false early, before attempting to compare exe paths.
     #[test]
     fn maybe_kill_pid_returns_false_when_cli_path_is_none() {
-        let system = System::new();
+        let mut system = System::new();
+        system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        // PID 1 is the init process on Unix, guaranteed to exist.
+        // On Windows or missing process, the earlier "PID not found" path will
+        // fire instead; either way the function returns false, which is correct.
         let result = maybe_kill_pid(1, None, &system, "test-run");
         assert!(!result, "must return false when CLI path is not configured");
     }
@@ -550,11 +560,11 @@ pub(crate) mod tests {
         assert!(matches!(read_meta_sync(&run_dir_b).status, RunStatus::Failed));
         assert_eq!(
             read_meta_sync(&run_dir_a).note.as_deref(),
-            Some("Terminated (app restarted)")
+            Some(ORPHAN_NOTE)
         );
         assert_eq!(
             read_meta_sync(&run_dir_b).note.as_deref(),
-            Some("Terminated (app restarted)")
+            Some(ORPHAN_NOTE)
         );
     }
 
