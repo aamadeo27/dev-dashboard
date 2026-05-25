@@ -56,7 +56,17 @@ Unit tests stay with the Coder. Do not duplicate them.
 ## Output
 
 ### 1. Test scenarios (appended to the Task doc)
-Add a `## Test scenarios` section to `docs/tasks/<task-id>.md`. List each scenario with: name, level (medium / e2e), preconditions, steps, expected result.
+Add a `## Test scenarios` section to `docs/tasks/<task-id>.md`. **High-level only.** One line per scenario: name — level (medium/e2e) — one-line assertion.
+
+Do NOT include: preconditions, steps, expected result, fixture details. The test code itself is the source of truth for those.
+
+Example:
+```
+## Test scenarios
+- happy-path-login — e2e — user logs in and lands on dashboard
+- invalid-password — medium — login returns 401, no session created
+- expired-token — medium — protected endpoint rejects with 401
+```
 
 ### 2. Test code
 - Medium tests under the project's medium/integration test folder
