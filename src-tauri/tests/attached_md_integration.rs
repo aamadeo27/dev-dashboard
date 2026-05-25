@@ -205,8 +205,8 @@ async fn it_t4_4_04_exact_limit_file_is_accepted() {
 // IT-T4.4-05: Empty file (0 bytes) is accepted and returns an empty Vec
 // ---------------------------------------------------------------------------
 
-/// An empty file must be accepted.  The caller (launch_run step 7b) skips the
-/// stdin write when content is empty — but the read itself must not fail.
+/// An empty file must be accepted.  The read must not fail, and the caller
+/// (launch_run step 7b) skips writing an empty content + newline to stdin.
 #[tokio::test]
 async fn it_t4_4_05_empty_file_is_accepted() {
     let dir = temp_dir();
@@ -278,13 +278,10 @@ async fn it_t4_4_07_invalid_input_message_mentions_size() {
     match result {
         Err(e) => {
             let msg = e.to_string();
-            // The message must contain either "too large" or a numeric byte count.
-            let mentions_size = msg.contains("too large")
-                || msg.contains("bytes")
-                || msg.chars().any(|c| c.is_ascii_digit());
+            // The message must mention either "too large" or "bytes".
             assert!(
-                mentions_size,
-                "InvalidInput message must mention size or 'too large'; got: {msg}"
+                msg.contains("too large") || msg.contains("bytes"),
+                "InvalidInput message must contain 'too large' or 'bytes'; got: {msg}"
             );
         }
         Ok(_) => panic!("expected Err(InvalidInput), got Ok"),

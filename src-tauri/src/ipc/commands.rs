@@ -756,26 +756,29 @@ pub async fn launch_run(
     // before the session handle is built, ensures the child receives the context
     // before any subsequent `send_input` calls.  A trailing newline separates the
     // context from the sequence prompt that follows.
+    // Empty content is skipped — writing only a lone newline may confuse the CLI.
     if let Some(ref content) = attached_md_content {
-        if let Some(ref mut stdin) = child_stdin {
-            if let Err(e) = stdin.write_all(content).await {
-                tracing::warn!(
-                    run_id = %run_id,
-                    error = %e,
-                    "launch_run: failed to write attached_md to stdin; continuing"
-                );
-            } else if let Err(e) = stdin.write_all(b"\n").await {
-                tracing::warn!(
-                    run_id = %run_id,
-                    error = %e,
-                    "launch_run: failed to write attached_md newline to stdin; continuing"
-                );
-            } else {
-                tracing::info!(
-                    run_id = %run_id,
-                    bytes = content.len(),
-                    "launch_run: wrote attached_md to stdin"
-                );
+        if !content.is_empty() {
+            if let Some(ref mut stdin) = child_stdin {
+                if let Err(e) = stdin.write_all(content).await {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        error = %e,
+                        "launch_run: failed to write attached_md to stdin; continuing"
+                    );
+                } else if let Err(e) = stdin.write_all(b"\n").await {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        error = %e,
+                        "launch_run: failed to write attached_md newline to stdin; continuing"
+                    );
+                } else {
+                    tracing::info!(
+                        run_id = %run_id,
+                        bytes = content.len(),
+                        "launch_run: wrote attached_md to stdin"
+                    );
+                }
             }
         }
     }
