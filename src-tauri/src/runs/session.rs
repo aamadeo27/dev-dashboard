@@ -1,7 +1,7 @@
 // RunSession — per-run state machine and background I/O loop.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -10,12 +10,12 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{AppError, AppResult};
-use crate::ipc::events;
+use super::manager::SessionHandle;
 use super::parser::EventParser;
 use super::transcript::TranscriptWriter;
 use super::{Run, RunStatus};
-use super::manager::SessionHandle;
+use crate::error::{AppError, AppResult};
+use crate::ipc::events;
 
 // ---------------------------------------------------------------------------
 // RunIoContext — bundles all per-run parameters for run_io_loop
@@ -48,7 +48,9 @@ pub fn validate_run_id(run_id: &str) -> bool {
     if run_id.is_empty() {
         return false;
     }
-    run_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    run_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
 /// Build the run directory path: `<project_path>/.claude/runs/<run_id>/`.
@@ -56,22 +58,28 @@ pub fn build_run_dir(project_path: &Path, run_id: &str) -> PathBuf {
     project_path.join(".claude").join("runs").join(run_id)
 }
 
-/// Resolve `..` components in a forward-slash-normalised path string without
-/// touching the filesystem.  Empty and `.` components are dropped; `..`
-/// components pop the last accumulated segment (no-op at the root).
+/// Resolve `.` and `..` components in a path lexically (without touching the
+/// filesystem), preserving any prefix/root component.  `.` is dropped; `..`
+/// pops the last normal segment.
+///
+/// Operating on `Path` components (rather than a slash-joined string) keeps the
+/// platform separator and any Windows `\\?\` verbatim prefix intact, so the
+/// result can be compared with [`Path::starts_with`].
 ///
 /// This is applied to `run_dir` inside `verify_run_dir_prefix` so that a path
 /// like `<project>/.claude/runs/../../outside` cannot bypass the prefix check.
-fn normalize_path_lexically(path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => { parts.pop(); }
-            p => parts.push(p),
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
         }
     }
-    parts.join("/")
+    out
 }
 
 /// Canonicalize `project_path` and verify that `run_dir` is rooted under
@@ -90,29 +98,33 @@ pub async fn verify_run_dir_prefix(project_path: &Path, run_dir: &Path) -> AppRe
         ))
     })?;
 
-    // Build the expected prefix string: <canonical>/.claude/runs/
-    let expected_prefix = canonical_project
-        .join(".claude")
-        .join("runs")
-        .to_string_lossy()
-        .into_owned();
+    // The expected prefix: <canonical>/.claude/runs
+    let expected_prefix = canonical_project.join(".claude").join("runs");
 
-    // run_dir may not exist yet (created by TranscriptWriter::create).
-    // Normalize Windows path separators, then collapse any `..` components
-    // lexically so a path like `<project>/.claude/runs/../../outside` cannot
-    // bypass the prefix check.
-    let run_dir_str = run_dir.to_string_lossy().into_owned();
-    let run_dir_norm = normalize_path_lexically(&run_dir_str.replace('\\', "/"));
+    // run_dir may not exist yet (created by TranscriptWriter::create), so it
+    // cannot be canonicalized directly. Re-root it onto the canonical project
+    // path: canonicalize() can rewrite the project path (Windows `\\?\` verbatim
+    // prefix, macOS /var -> /private/var symlink), so a freshly-joined run_dir
+    // built from the original project_path would otherwise never share the
+    // canonical prefix. A run_dir outside the project (strip_prefix fails) is
+    // left untouched and will fail the prefix check below.
+    let run_dir_rebased = match run_dir.strip_prefix(project_path) {
+        Ok(rel) => canonical_project.join(rel),
+        Err(_) => run_dir.to_path_buf(),
+    };
 
-    // Append a trailing "/" so that a sibling dir like `.claude/runs-evil/`
-    // cannot falsely pass as a prefix of `.claude/runs/`.
-    let prefix_norm = format!("{}/", expected_prefix.replace('\\', "/"));
+    // Collapse any `..`/`.` components lexically so a path like
+    // `<project>/.claude/runs/../../outside` cannot bypass the prefix check.
+    // `Path::starts_with` matches whole components, so a sibling dir such as
+    // `.claude/runs-evil/` is correctly rejected (its `runs-evil` component
+    // does not equal `runs`).
+    let run_dir_norm = normalize_path_lexically(&run_dir_rebased);
 
-    if !run_dir_norm.starts_with(&prefix_norm) {
+    if !run_dir_norm.starts_with(&expected_prefix) {
         return Err(AppError::PermissionDenied(format!(
             "run_dir '{}' is outside the expected prefix '{}'",
             run_dir.display(),
-            expected_prefix,
+            expected_prefix.display(),
         )));
     }
 
@@ -326,9 +338,7 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
     // ── Step 4: wait for child exit ──────────────────────────────────────────
 
     let exit_status = child.wait().await;
-    let exit_code: Option<i32> = exit_status
-        .ok()
-        .and_then(|s| s.code());
+    let exit_code: Option<i32> = exit_status.ok().and_then(|s| s.code());
 
     // ── Step 5: determine final status ──────────────────────────────────────
 
@@ -409,9 +419,18 @@ mod tests {
     /// Path traversal patterns must be rejected.
     #[test]
     fn validate_run_id_rejects_slashes() {
-        assert!(!validate_run_id("../etc/passwd"), "path traversal must be rejected");
-        assert!(!validate_run_id("/absolute/path"), "absolute path must be rejected");
-        assert!(!validate_run_id("foo/bar"), "forward slash must be rejected");
+        assert!(
+            !validate_run_id("../etc/passwd"),
+            "path traversal must be rejected"
+        );
+        assert!(
+            !validate_run_id("/absolute/path"),
+            "absolute path must be rejected"
+        );
+        assert!(
+            !validate_run_id("foo/bar"),
+            "forward slash must be rejected"
+        );
         assert!(!validate_run_id("foo\\bar"), "backslash must be rejected");
     }
 
@@ -425,8 +444,14 @@ mod tests {
     #[test]
     fn validate_run_id_rejects_spaces() {
         assert!(!validate_run_id("my run"), "space must be rejected");
-        assert!(!validate_run_id(" leading"), "leading space must be rejected");
-        assert!(!validate_run_id("trailing "), "trailing space must be rejected");
+        assert!(
+            !validate_run_id(" leading"),
+            "leading space must be rejected"
+        );
+        assert!(
+            !validate_run_id("trailing "),
+            "trailing space must be rejected"
+        );
     }
 
     // ── build_run_dir ────────────────────────────────────────────────────────
@@ -500,10 +525,7 @@ mod tests {
             validate_run_id("ABC"),
             "upper-case letters must be accepted"
         );
-        assert!(
-            validate_run_id("a"),
-            "single-char id must be accepted"
-        );
+        assert!(validate_run_id("a"), "single-char id must be accepted");
         assert!(
             validate_run_id("Z9.x_y-z"),
             "mixed valid chars must be accepted"
@@ -542,10 +564,7 @@ mod tests {
             !validate_run_id("run\0id"),
             "embedded null byte must be rejected"
         );
-        assert!(
-            !validate_run_id("\0"),
-            "lone null byte must be rejected"
-        );
+        assert!(!validate_run_id("\0"), "lone null byte must be rejected");
     }
 
     /// `build_run_dir` must embed the `.claude/runs/` segment between the

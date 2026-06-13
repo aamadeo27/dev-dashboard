@@ -50,7 +50,8 @@ const RUN_BTN_STYLE: React.CSSProperties = {
   borderRadius: "var(--radius-md)",
   padding: "var(--space-1) var(--space-3)",
   cursor: "pointer",
-  transition: "background var(--duration-fast) var(--easing-out), border-color var(--duration-fast) var(--easing-out)",
+  transition:
+    "background var(--duration-fast) var(--easing-out), border-color var(--duration-fast) var(--easing-out)",
   alignSelf: "flex-start",
 };
 
@@ -58,7 +59,12 @@ const RUN_BTN_STYLE: React.CSSProperties = {
 // SequenceRow — wrapped in React.memo (FIX-3)
 // ---------------------------------------------------------------------------
 
-export const SequenceRow = React.memo(function SequenceRow({ sequence, selected = false, onRun, onSelect }: SequenceRowProps) {
+export const SequenceRow = React.memo(function SequenceRow({
+  sequence,
+  selected = false,
+  onRun,
+  onSelect,
+}: SequenceRowProps) {
   const [hovered, setHovered] = React.useState(false);
 
   // rowStyle depends on selected and hovered state — kept inline (FIX-6)
@@ -71,11 +77,7 @@ export const SequenceRow = React.memo(function SequenceRow({ sequence, selected 
     borderRadius: "var(--radius-md)",
     cursor: onSelect ? "pointer" : "default",
     transition: "background var(--duration-fast) var(--easing-out)",
-    background: selected
-      ? "var(--primary-dim)"
-      : hovered
-        ? "var(--bg-hover)"
-        : "transparent",
+    background: selected ? "var(--primary-dim)" : hovered ? "var(--bg-hover)" : "transparent",
     // FIX-2: left border only for selected state; transparent placeholder for layout stability
     borderLeft: selected ? "3px solid var(--primary)" : "3px solid transparent",
     userSelect: "none",
@@ -85,7 +87,7 @@ export const SequenceRow = React.memo(function SequenceRow({ sequence, selected 
     onSelect?.(sequence);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLLIElement>) {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onSelect?.(sequence);
@@ -98,8 +100,7 @@ export const SequenceRow = React.memo(function SequenceRow({ sequence, selected 
   }
 
   return (
-    <div
-      role="listitem"
+    <li
       aria-selected={selected}
       data-selected={selected ? "true" : "false"}
       tabIndex={onSelect ? 0 : undefined}
@@ -121,7 +122,7 @@ export const SequenceRow = React.memo(function SequenceRow({ sequence, selected 
       >
         Run
       </button>
-    </div>
+    </li>
   );
 });
 

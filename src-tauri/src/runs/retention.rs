@@ -62,7 +62,8 @@ pub async fn run(project_paths: &[PathBuf], retention_days: u32, retention_size_
 
 /// Spawn the 24-hour background timer loop that repeatedly calls `run`.
 pub async fn start(app_handle: tauri::AppHandle) {
-    let _ = tokio::spawn(async move {
+    // Detached background timer; the JoinHandle is intentionally dropped.
+    tokio::spawn(async move {
         loop {
             // sleep first: startup sweep already ran; first periodic sweep fires 24 h later.
             tokio::time::sleep(tokio::time::Duration::from_secs(86_400)).await;
@@ -95,7 +96,11 @@ pub async fn start(app_handle: tauri::AppHandle) {
 // ---------------------------------------------------------------------------
 
 /// Prune a single project's runs dir. Returns the count of deleted run dirs.
-async fn prune_project(project_path: &Path, cutoff: chrono::DateTime<Utc>, size_cap_bytes: u64) -> u32 {
+async fn prune_project(
+    project_path: &Path,
+    cutoff: chrono::DateTime<Utc>,
+    size_cap_bytes: u64,
+) -> u32 {
     let runs_dir = project_path.join(".claude").join("runs");
 
     // Collect terminal-state run candidates.
@@ -202,7 +207,10 @@ async fn collect_terminal_runs(runs_dir: &Path) -> Option<Vec<RunCandidate>> {
         };
 
         // Only terminal statuses are eligible for pruning.
-        if !matches!(run.status, RunStatus::Completed | RunStatus::Failed | RunStatus::Stopped) {
+        if !matches!(
+            run.status,
+            RunStatus::Completed | RunStatus::Failed | RunStatus::Stopped
+        ) {
             continue;
         }
 
@@ -453,8 +461,14 @@ mod tests {
         run(&[project_path], 30, 500).await;
 
         // Oldest (run-a) must be deleted; run-b and run-c survive (400 MB ≤ 500 MB cap).
-        assert!(!run_a.exists(), "run-a (oldest, 200 MB) must be deleted to satisfy size cap");
-        assert!(run_b.exists(), "run-b must survive after run-a deletion brings total to 400 MB");
+        assert!(
+            !run_a.exists(),
+            "run-a (oldest, 200 MB) must be deleted to satisfy size cap"
+        );
+        assert!(
+            run_b.exists(),
+            "run-b must survive after run-a deletion brings total to 400 MB"
+        );
         assert!(run_c.exists(), "run-c (newest) must survive");
     }
 
@@ -486,7 +500,10 @@ mod tests {
         run(&[project_path], 30, 500).await;
 
         assert!(!run_old.exists(), "run-old must be deleted by age rule");
-        assert!(run_mid.exists(), "run-mid (10 days, 200 MB) must survive — 400 MB ≤ 500 MB cap");
+        assert!(
+            run_mid.exists(),
+            "run-mid (10 days, 200 MB) must survive — 400 MB ≤ 500 MB cap"
+        );
         assert!(run_new.exists(), "run-new must survive");
     }
 
@@ -551,9 +568,18 @@ mod tests {
 
         run(&[project_path], 30, 500).await;
 
-        assert!(!completed_dir.exists(), "Completed run older than cap must be deleted");
-        assert!(!failed_dir.exists(), "Failed run older than cap must be deleted");
-        assert!(!stopped_dir.exists(), "Stopped run older than cap must be deleted");
+        assert!(
+            !completed_dir.exists(),
+            "Completed run older than cap must be deleted"
+        );
+        assert!(
+            !failed_dir.exists(),
+            "Failed run older than cap must be deleted"
+        );
+        assert!(
+            !stopped_dir.exists(),
+            "Stopped run older than cap must be deleted"
+        );
     }
 
     // ── Test 10: size pruning skips non-existent dirs gracefully ─────────────
@@ -567,7 +593,8 @@ mod tests {
             .join("runs")
             .join("run-corrupt");
         std::fs::create_dir_all(&run_dir).expect("create run_dir");
-        std::fs::write(run_dir.join("meta.json"), b"{ not valid json !!! }").expect("write corrupt");
+        std::fs::write(run_dir.join("meta.json"), b"{ not valid json !!! }")
+            .expect("write corrupt");
 
         // Must not panic; corrupt entry is skipped.
         run(&[project_path], 30, 500).await;

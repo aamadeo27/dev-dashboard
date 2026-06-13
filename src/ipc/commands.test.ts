@@ -46,7 +46,16 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 // Import after mock registration.
 import { invoke } from "@tauri-apps/api/core";
-import type { CliCheck, LaunchInput, Project, Run, RunStatus, Sequence, Settings, SettingsPatch } from "./bindings";
+import type {
+  CliCheck,
+  LaunchInput,
+  Project,
+  Run,
+  RunStatus,
+  Sequence,
+  Settings,
+  SettingsPatch,
+} from "./bindings";
 import * as allCommands from "./commands";
 import {
   addProject,

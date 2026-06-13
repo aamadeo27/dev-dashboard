@@ -1,5 +1,5 @@
-pub(crate) mod scanner;
 pub mod git;
+pub(crate) mod scanner;
 
 use std::path::{Path, PathBuf};
 
@@ -22,8 +22,11 @@ pub struct Project {
     pub package_manager: Option<String>,
     pub added_at: chrono::DateTime<chrono::Utc>,
     pub last_modified: Option<chrono::DateTime<chrono::Utc>>,
-    /// Computed live in `list_projects()`; never persisted to JSON.
-    #[serde(skip)]
+    /// Computed live in `list_projects()`; sent to the frontend over IPC but
+    /// never persisted to `projects.json` (stripped in `save`) and ignored when
+    /// loading (recomputed). `skip_deserializing` keeps it out of the loaded
+    /// value while still serializing it for IPC responses.
+    #[serde(skip_deserializing)]
     pub is_missing: bool,
 }
 
@@ -96,7 +99,18 @@ impl ProjectRegistry {
         let tmp_name = format!("projects.{}.tmp", Uuid::new_v4());
         let tmp_path = self.config_dir.join(&tmp_name);
         let final_path = self.config_dir.join("projects.json");
-        let json = serde_json::to_string_pretty(&self.projects)
+        // `is_missing` serializes for IPC but must not be persisted — strip it
+        // from each entry before writing the file (it is recomputed on load).
+        let mut value = serde_json::to_value(&self.projects)
+            .map_err(|e| AppError::Internal(format!("serialize projects: {e}")))?;
+        if let Some(entries) = value.as_array_mut() {
+            for entry in entries {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("is_missing");
+                }
+            }
+        }
+        let json = serde_json::to_string_pretty(&value)
             .map_err(|e| AppError::Internal(format!("serialize projects: {e}")))?;
         tokio::fs::write(&tmp_path, json).await?;
         tokio::fs::rename(&tmp_path, &final_path).await?;
@@ -109,10 +123,7 @@ impl ProjectRegistry {
         // tokio::fs::canonicalize resolves symlinks and verifies existence.
         let canonical = tokio::fs::canonicalize(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                AppError::InvalidInput(format!(
-                    "path does not exist: {}",
-                    path.display()
-                ))
+                AppError::InvalidInput(format!("path does not exist: {}", path.display()))
             } else {
                 AppError::Io(std::io::Error::new(
                     e.kind(),
@@ -177,9 +188,10 @@ impl ProjectRegistry {
             .unwrap_or_else(|| canonical.to_string_lossy().into_owned());
 
         let canonical_clone = canonical.clone();
-        let (language, package_manager) = tokio::task::spawn_blocking(move || {
-            crate::projects::scanner::detect(&canonical_clone)
-        }).await.map_err(|e| AppError::Internal(format!("scanner task panicked: {e}")))?;
+        let (language, package_manager) =
+            tokio::task::spawn_blocking(move || crate::projects::scanner::detect(&canonical_clone))
+                .await
+                .map_err(|e| AppError::Internal(format!("scanner task panicked: {e}")))?;
 
         let project = Project {
             id: Uuid::now_v7().to_string(),
@@ -242,7 +254,11 @@ impl ProjectRegistry {
         let canonical = Self::canonicalize_dir(&new_path).await?;
 
         // Check for duplicate (must not belong to a different project).
-        if self.projects.iter().any(|p| p.path == canonical && p.id != id) {
+        if self
+            .projects
+            .iter()
+            .any(|p| p.path == canonical && p.id != id)
+        {
             return Err(AppError::AlreadyExists(format!(
                 "path already registered: {}",
                 canonical.display()
@@ -329,7 +345,10 @@ impl ProjectRegistry {
     pub async fn scan_project(&mut self, id: &str) -> AppResult<Project> {
         // Clone the path first so we can release the mutable borrow before
         // awaiting the spawn_blocking future (cannot hold &mut self across await).
-        let path = self.projects.iter().find(|p| p.id == id)
+        let path = self
+            .projects
+            .iter()
+            .find(|p| p.id == id)
             .map(|p| p.path.clone())
             .ok_or_else(|| {
                 tracing::warn!(
@@ -340,12 +359,15 @@ impl ProjectRegistry {
                 AppError::NotFound(format!("project id: {id}"))
             })?;
 
-        let (language, package_manager) = tokio::task::spawn_blocking(move || {
-            crate::projects::scanner::detect(&path)
-        }).await.map_err(|e| AppError::Internal(format!("scanner task panicked: {e}")))?;
+        let (language, package_manager) =
+            tokio::task::spawn_blocking(move || crate::projects::scanner::detect(&path))
+                .await
+                .map_err(|e| AppError::Internal(format!("scanner task panicked: {e}")))?;
 
         // Re-find by id after the await point — the mutable borrow was released above.
-        let project = self.projects.iter_mut()
+        let project = self
+            .projects
+            .iter_mut()
             .find(|p| p.id == id)
             .ok_or_else(|| AppError::NotFound(format!("project not found: {id}")))?;
         project.language = language;
@@ -370,7 +392,10 @@ impl ProjectRegistry {
     ///
     /// Used by the git poller to resolve paths without holding the lock during I/O.
     pub fn get_project_path(&self, id: &str) -> Option<std::path::PathBuf> {
-        self.projects.iter().find(|p| p.id == id).map(|p| p.path.clone())
+        self.projects
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.path.clone())
     }
 
     /// Return all projects. `is_missing` is computed live via an async
@@ -425,7 +450,10 @@ mod tests {
         assert!(!project.name.is_empty(), "name must be set from basename");
         assert_eq!(project.language, None);
         assert_eq!(project.package_manager, None);
-        assert!(!project.is_missing, "is_missing must be false immediately after add");
+        assert!(
+            !project.is_missing,
+            "is_missing must be false immediately after add"
+        );
 
         let list = registry.list_projects().await;
         assert_eq!(list.len(), 1);
@@ -766,12 +794,24 @@ mod tests {
         assert_eq!(p.id, original_id, "id must survive round-trip");
         assert_eq!(p.name, original_name, "name must survive round-trip");
         assert_eq!(p.tags, original_tags, "tags must survive round-trip");
-        assert_eq!(p.added_at, original_added_at, "added_at must survive round-trip");
-        assert!(p.last_modified.is_some(), "last_modified must be Some after set_project_tags");
+        assert_eq!(
+            p.added_at, original_added_at,
+            "added_at must survive round-trip"
+        );
+        assert!(
+            p.last_modified.is_some(),
+            "last_modified must be Some after set_project_tags"
+        );
         assert_eq!(p.language, None, "language (None) must survive round-trip");
-        assert_eq!(p.package_manager, None, "package_manager (None) must survive round-trip");
+        assert_eq!(
+            p.package_manager, None,
+            "package_manager (None) must survive round-trip"
+        );
         // is_missing is computed live; after reload the directory still exists.
-        assert!(!p.is_missing, "is_missing must be false after reload while dir still exists");
+        assert!(
+            !p.is_missing,
+            "is_missing must be false after reload while dir still exists"
+        );
     }
 
     /// `normalize_tags` deduplication is case-insensitive: "Rust" and "rust"
@@ -784,7 +824,11 @@ mod tests {
         // (the first occurrence lowercased, the duplicate dropped).
         let tags = vec!["Rust".to_string(), "rust".to_string()];
         let result = ProjectRegistry::normalize_tags(&tags);
-        assert_eq!(result, vec!["rust"], "case variants must deduplicate to single entry");
+        assert_eq!(
+            result,
+            vec!["rust"],
+            "case variants must deduplicate to single entry"
+        );
 
         // "TYPESCRIPT" first, then mixed-case duplicate.
         let tags2 = vec![

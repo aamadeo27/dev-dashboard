@@ -11,6 +11,8 @@ use super::{Run, RunEvent};
 /// Per-run writer that owns async file handles for `meta.json`,
 /// `transcript.jsonl`, and `raw.log` under a given `run_dir`.
 pub struct TranscriptWriter {
+    // Retained for diagnostics/identification; not read on the happy path.
+    #[allow(dead_code)]
     run_id: String,
     run_dir: std::path::PathBuf,
     transcript: tokio::io::BufWriter<tokio::fs::File>,
@@ -60,8 +62,7 @@ impl TranscriptWriter {
     /// `transcript.jsonl`, and flush immediately so the event is durable
     /// even if the process crashes before `close()` is called.
     pub async fn append_event(&mut self, event: &RunEvent) -> AppResult<()> {
-        let mut line = serde_json::to_string(event)
-            .map_err(|e| AppError::Parse(e.to_string()))?;
+        let mut line = serde_json::to_string(event).map_err(|e| AppError::Parse(e.to_string()))?;
         line.push('\n');
         self.transcript.write_all(line.as_bytes()).await?;
         self.transcript.flush().await?;
@@ -73,8 +74,8 @@ impl TranscriptWriter {
     /// caller — it avoids repeated flush calls and keeps the write path batched.
     pub async fn append_events(&mut self, events: &[RunEvent]) -> AppResult<()> {
         for event in events {
-            let mut line = serde_json::to_string(event)
-                .map_err(|e| AppError::Parse(e.to_string()))?;
+            let mut line =
+                serde_json::to_string(event).map_err(|e| AppError::Parse(e.to_string()))?;
             line.push('\n');
             self.transcript.write_all(line.as_bytes()).await?;
         }
@@ -117,8 +118,7 @@ async fn write_meta_atomic(run_dir: &Path, run: &Run) -> AppResult<()> {
     let meta_path = run_dir.join("meta.json");
     let tmp_path = run_dir.join("meta.json.tmp");
 
-    let pretty = serde_json::to_string_pretty(run)
-        .map_err(|e| AppError::Parse(e.to_string()))?;
+    let pretty = serde_json::to_string_pretty(run).map_err(|e| AppError::Parse(e.to_string()))?;
 
     {
         // close file handle before rename — required on Windows
@@ -237,7 +237,7 @@ mod tests {
         let run_dir = tmp.path().join("run-3");
 
         let run = make_run("run-3");
-        let mut writer = TranscriptWriter::create("run-3", &run_dir, &run)
+        let writer = TranscriptWriter::create("run-3", &run_dir, &run)
             .await
             .expect("create");
 
@@ -279,7 +279,10 @@ mod tests {
 
         let messages = ["alpha", "beta", "gamma"];
         for msg in &messages {
-            writer.append_event(&make_event(msg)).await.expect("append_event");
+            writer
+                .append_event(&make_event(msg))
+                .await
+                .expect("append_event");
         }
         writer.close().await.expect("close");
 
@@ -287,12 +290,13 @@ mod tests {
             .expect("read transcript.jsonl");
 
         // Each non-empty line must independently parse as a RunEvent.
-        let lines: Vec<&str> = contents
-            .lines()
-            .filter(|l| !l.is_empty())
-            .collect();
+        let lines: Vec<&str> = contents.lines().filter(|l| !l.is_empty()).collect();
 
-        assert_eq!(lines.len(), messages.len(), "should have one line per event");
+        assert_eq!(
+            lines.len(),
+            messages.len(),
+            "should have one line per event"
+        );
 
         for (i, line) in lines.iter().enumerate() {
             let parsed: RunEvent =
@@ -324,8 +328,14 @@ mod tests {
             .await
             .expect("create B");
 
-        writer_a.append_event(&make_event("from-a")).await.expect("append A");
-        writer_b.append_event(&make_event("from-b")).await.expect("append B");
+        writer_a
+            .append_event(&make_event("from-a"))
+            .await
+            .expect("append A");
+        writer_b
+            .append_event(&make_event("from-b"))
+            .await
+            .expect("append B");
 
         writer_a.close().await.expect("close A");
         writer_b.close().await.expect("close B");
@@ -391,7 +401,10 @@ mod tests {
         let mut expected = Vec::new();
         expected.extend_from_slice(chunk1);
         expected.extend_from_slice(chunk2);
-        assert_eq!(bytes, expected, "raw.log must contain both chunks concatenated");
+        assert_eq!(
+            bytes, expected,
+            "raw.log must contain both chunks concatenated"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -430,13 +443,22 @@ mod tests {
             .expect("create");
 
         // Immediately close without appending anything.
-        writer.close().await.expect("close with zero events must not error");
+        writer
+            .close()
+            .await
+            .expect("close with zero events must not error");
 
         let transcript_path = run_dir.join("transcript.jsonl");
-        assert!(transcript_path.exists(), "transcript.jsonl must still exist");
+        assert!(
+            transcript_path.exists(),
+            "transcript.jsonl must still exist"
+        );
 
         let contents = std::fs::read(transcript_path).expect("read transcript.jsonl");
-        assert!(contents.is_empty(), "transcript.jsonl must be empty (0 bytes)");
+        assert!(
+            contents.is_empty(),
+            "transcript.jsonl must be empty (0 bytes)"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -448,7 +470,7 @@ mod tests {
         let run_dir = tmp.path().join("run-9");
 
         let run = make_run("run-9");
-        let mut writer = TranscriptWriter::create("run-9", &run_dir, &run)
+        let writer = TranscriptWriter::create("run-9", &run_dir, &run)
             .await
             .expect("create");
 
@@ -463,7 +485,10 @@ mod tests {
         second.status = RunStatus::Completed;
         second.exit_code = Some(0);
         second.note = Some("second update".to_string());
-        writer.update_meta(&second).await.expect("second update_meta");
+        writer
+            .update_meta(&second)
+            .await
+            .expect("second update_meta");
 
         writer.close().await.expect("close");
 
@@ -513,7 +538,10 @@ mod tests {
             text: "Session started".to_string(),
             ts: chrono::Utc::now(),
         };
-        writer.append_event(&system_event).await.expect("append System event");
+        writer
+            .append_event(&system_event)
+            .await
+            .expect("append System event");
         writer.close().await.expect("close");
 
         let contents = std::fs::read_to_string(run_dir.join("transcript.jsonl"))
@@ -560,7 +588,10 @@ mod tests {
             input: input_value.clone(),
             ts: chrono::Utc::now(),
         };
-        writer.append_event(&tool_call).await.expect("append ToolCall");
+        writer
+            .append_event(&tool_call)
+            .await
+            .expect("append ToolCall");
         writer.close().await.expect("close");
 
         let contents = std::fs::read_to_string(run_dir.join("transcript.jsonl"))
@@ -570,7 +601,9 @@ mod tests {
         let parsed: RunEvent = serde_json::from_str(line).expect("parse RunEvent");
 
         match parsed {
-            RunEvent::ToolCall { id, name, input, .. } => {
+            RunEvent::ToolCall {
+                id, name, input, ..
+            } => {
                 assert_eq!(id, "call-abc123");
                 assert_eq!(name, "write_file");
                 assert_eq!(input, input_value, "ToolCall input Value must round-trip");
@@ -599,7 +632,10 @@ mod tests {
             is_error: true,
             ts: chrono::Utc::now(),
         };
-        writer.append_event(&tool_result).await.expect("append ToolResult");
+        writer
+            .append_event(&tool_result)
+            .await
+            .expect("append ToolResult");
         writer.close().await.expect("close");
 
         let contents = std::fs::read_to_string(run_dir.join("transcript.jsonl"))
@@ -609,7 +645,12 @@ mod tests {
         let parsed: RunEvent = serde_json::from_str(line).expect("parse RunEvent");
 
         match parsed {
-            RunEvent::ToolResult { call_id, output, is_error, .. } => {
+            RunEvent::ToolResult {
+                call_id,
+                output,
+                is_error,
+                ..
+            } => {
                 assert_eq!(call_id, "call-abc123");
                 assert_eq!(output, output_value);
                 assert!(is_error, "is_error must be true after round-trip");
@@ -636,7 +677,10 @@ mod tests {
             message: "linker error: undefined symbol".to_string(),
             ts: chrono::Utc::now(),
         };
-        writer.append_event(&step_failed).await.expect("append StepFailed");
+        writer
+            .append_event(&step_failed)
+            .await
+            .expect("append StepFailed");
         writer.close().await.expect("close");
 
         let contents = std::fs::read_to_string(run_dir.join("transcript.jsonl"))
@@ -672,7 +716,10 @@ mod tests {
         // serde_json compact serialization MUST escape \n as \\n, \t as \\t, etc.
         let tricky_text = "line1\nline2\ttabbed\\backslash\u{1F4A5}boom\"quote";
         let event = make_event(tricky_text);
-        writer.append_event(&event).await.expect("append_event with special chars");
+        writer
+            .append_event(&event)
+            .await
+            .expect("append_event with special chars");
         writer.close().await.expect("close");
 
         let contents = std::fs::read_to_string(run_dir.join("transcript.jsonl"))
@@ -721,16 +768,19 @@ mod tests {
 
         // 10 000 characters with embedded newlines every 80 chars.
         let long_text: String = (0..125)
-            .map(|i| format!("{:079}\n", i))  // 79 digits + '\n' = 80 chars each
+            .map(|i| format!("{:079}\n", i)) // 79 digits + '\n' = 80 chars each
             .collect();
         assert_eq!(long_text.len(), 10_000);
 
         let event = make_event(&long_text);
-        writer.append_event(&event).await.expect("append_event long text");
+        writer
+            .append_event(&event)
+            .await
+            .expect("append_event long text");
         writer.close().await.expect("close");
 
-        let raw_bytes = std::fs::read(run_dir.join("transcript.jsonl"))
-            .expect("read transcript.jsonl");
+        let raw_bytes =
+            std::fs::read(run_dir.join("transcript.jsonl")).expect("read transcript.jsonl");
         let contents = String::from_utf8(raw_bytes).expect("transcript.jsonl must be UTF-8");
 
         // Must still be exactly one physical line.
@@ -862,8 +912,8 @@ mod tests {
         // Each line must parse as an AssistantText event with the correct text.
         let expected_texts = ["first", "second", "third"];
         for (i, (line, expected_text)) in lines.iter().zip(expected_texts.iter()).enumerate() {
-            let parsed: RunEvent =
-                serde_json::from_str(line).unwrap_or_else(|e| panic!("line {} failed to parse: {}", i, e));
+            let parsed: RunEvent = serde_json::from_str(line)
+                .unwrap_or_else(|e| panic!("line {} failed to parse: {}", i, e));
             if let RunEvent::AssistantText { text, .. } = parsed {
                 assert_eq!(
                     text, *expected_text,
@@ -891,10 +941,16 @@ mod tests {
             .expect("create");
 
         // Call append_events with an empty slice — must not error.
-        writer.append_events(&[]).await.expect("append_events empty slice must not error");
+        writer
+            .append_events(&[])
+            .await
+            .expect("append_events empty slice must not error");
         writer.close().await.expect("close");
 
         let bytes = std::fs::read(run_dir.join("transcript.jsonl")).expect("read transcript.jsonl");
-        assert!(bytes.is_empty(), "transcript.jsonl must be empty after appending zero events");
+        assert!(
+            bytes.is_empty(),
+            "transcript.jsonl must be empty after appending zero events"
+        );
     }
 }

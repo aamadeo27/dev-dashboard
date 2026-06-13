@@ -24,7 +24,6 @@
 /// (Cargo is not available in the CI sandbox that generates this file; tests
 /// are authored to be structurally correct and must be verified at runtime
 /// with `cargo test`.)
-
 use dev_dashboard_lib::projects::ProjectRegistry;
 
 // ---------------------------------------------------------------------------
@@ -70,12 +69,8 @@ async fn projects_json_created_at_correct_location() {
         .expect("read config dir")
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("projects.")
-                && e.file_name()
-                    .to_string_lossy()
-                    .ends_with(".tmp")
+            e.file_name().to_string_lossy().starts_with("projects.")
+                && e.file_name().to_string_lossy().ends_with(".tmp")
         })
         .collect();
     assert!(
@@ -113,12 +108,18 @@ async fn round_trip_all_project_fields_survive_save_and_reload() {
             .await
             .expect("set_project_tags must succeed");
 
-        (id, name, updated.tags.clone(), added_at, updated.last_modified)
+        (
+            id,
+            name,
+            updated.tags.clone(),
+            added_at,
+            updated.last_modified,
+        )
     };
 
     // Reload from disk into a fresh registry.
     let registry2 = ProjectRegistry::load(config.path());
-    let list = registry2.list_projects();
+    let list = registry2.list_projects().await;
 
     assert_eq!(list.len(), 1, "exactly one project must survive reload");
 
@@ -126,7 +127,10 @@ async fn round_trip_all_project_fields_survive_save_and_reload() {
     assert_eq!(p.id, saved_id, "id must survive round-trip");
     assert_eq!(p.name, saved_name, "name must survive round-trip");
     assert_eq!(p.tags, saved_tags, "tags must survive round-trip");
-    assert_eq!(p.added_at, saved_added_at, "added_at must survive round-trip");
+    assert_eq!(
+        p.added_at, saved_added_at,
+        "added_at must survive round-trip"
+    );
     assert_eq!(
         p.last_modified, saved_last_modified,
         "last_modified must survive round-trip"
@@ -158,8 +162,8 @@ async fn is_missing_not_written_to_json() {
         .expect("add_project must succeed");
 
     let json_path = config.path().join("projects.json");
-    let json_text = std::fs::read_to_string(&json_path)
-        .expect("projects.json must exist after add_project");
+    let json_text =
+        std::fs::read_to_string(&json_path).expect("projects.json must exist after add_project");
 
     assert!(
         !json_text.contains("\"is_missing\""),
@@ -190,15 +194,21 @@ async fn list_projects_is_missing_true_after_directory_deleted() {
         .expect("add_project must succeed");
 
     // is_missing must be false while the directory exists.
-    assert!(!proj.is_missing, "is_missing must be false immediately after add");
+    assert!(
+        !proj.is_missing,
+        "is_missing must be false immediately after add"
+    );
 
-    let list_before = registry.list_projects();
-    assert!(!list_before[0].is_missing, "is_missing must be false before deletion");
+    let list_before = registry.list_projects().await;
+    assert!(
+        !list_before[0].is_missing,
+        "is_missing must be false before deletion"
+    );
 
     // Delete the directory.
     drop(project_dir);
 
-    let list_after = registry.list_projects();
+    let list_after = registry.list_projects().await;
     assert_eq!(list_after.len(), 1);
     assert!(
         list_after[0].is_missing,
@@ -213,8 +223,8 @@ async fn list_projects_is_missing_true_after_directory_deleted() {
 /// Loading from a config directory that contains no `projects.json` must
 /// return an empty registry — not an error.  This is the normal first-run
 /// path.
-#[test]
-fn load_with_no_projects_json_returns_empty_registry() {
+#[tokio::test]
+async fn load_with_no_projects_json_returns_empty_registry() {
     let config = temp_dir();
 
     // Verify no file exists to start with.
@@ -222,7 +232,7 @@ fn load_with_no_projects_json_returns_empty_registry() {
 
     let registry = ProjectRegistry::load(config.path());
     assert!(
-        registry.list_projects().is_empty(),
+        registry.list_projects().await.is_empty(),
         "registry loaded from empty config dir must have no projects"
     );
 }
@@ -234,8 +244,8 @@ fn load_with_no_projects_json_returns_empty_registry() {
 /// If `projects.json` is malformed, `load()` must fall back to an empty
 /// registry rather than panicking or propagating the parse error to the
 /// caller.
-#[test]
-fn corrupt_projects_json_returns_empty_registry() {
+#[tokio::test]
+async fn corrupt_projects_json_returns_empty_registry() {
     let config = temp_dir();
     let json_path = config.path().join("projects.json");
 
@@ -243,7 +253,7 @@ fn corrupt_projects_json_returns_empty_registry() {
 
     let registry = ProjectRegistry::load(config.path());
     assert!(
-        registry.list_projects().is_empty(),
+        registry.list_projects().await.is_empty(),
         "corrupt projects.json must yield empty registry, not a panic or error"
     );
 }
@@ -274,7 +284,7 @@ async fn multiple_projects_all_survive_round_trip() {
     };
 
     let registry2 = ProjectRegistry::load(config.path());
-    let list = registry2.list_projects();
+    let list = registry2.list_projects().await;
 
     assert_eq!(list.len(), 2, "both projects must survive reload");
     assert_eq!(list[0].id, id_a, "first project id must survive reload");
@@ -303,15 +313,21 @@ async fn remove_project_persisted_across_reload() {
             .add_project(dir_b.path().to_path_buf())
             .await
             .expect("add project B");
-        registry.remove_project(&a.id).await.expect("remove project A");
+        registry
+            .remove_project(&a.id)
+            .await
+            .expect("remove project A");
         a.id.clone()
     };
 
     let registry2 = ProjectRegistry::load(config.path());
-    let list = registry2.list_projects();
+    let list = registry2.list_projects().await;
 
     assert_eq!(list.len(), 1, "only one project must remain after reload");
-    assert_ne!(list[0].id, id_a, "removed project must not appear after reload");
+    assert_ne!(
+        list[0].id, id_a,
+        "removed project must not appear after reload"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -404,8 +420,11 @@ async fn relocate_project_to_path_of_another_project_returns_already_exists() {
     );
 
     // Sanity: A's path is unchanged.
-    let list = registry.list_projects();
-    let a_entry = list.iter().find(|p| p.id == proj_a.id).expect("proj A must still exist");
+    let list = registry.list_projects().await;
+    let a_entry = list
+        .iter()
+        .find(|p| p.id == proj_a.id)
+        .expect("proj A must still exist");
     assert_eq!(
         a_entry.path,
         dir_a.path().canonicalize().unwrap(),
@@ -435,9 +454,9 @@ async fn set_project_tags_survives_round_trip() {
                 &proj.id,
                 vec![
                     "Rust".to_string(),
-                    "rust".to_string(),       // duplicate — must be dropped
+                    "rust".to_string(), // duplicate — must be dropped
                     "Tauri".to_string(),
-                    "  ".to_string(),         // whitespace-only — must be dropped
+                    "  ".to_string(), // whitespace-only — must be dropped
                 ],
             )
             .await
@@ -445,7 +464,7 @@ async fn set_project_tags_survives_round_trip() {
     }
 
     let registry2 = ProjectRegistry::load(config.path());
-    let list = registry2.list_projects();
+    let list = registry2.list_projects().await;
     assert_eq!(list.len(), 1);
     assert_eq!(
         list[0].tags,

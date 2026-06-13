@@ -1,11 +1,11 @@
 // RunManager goes here
 
-pub(crate) mod session;
-pub(crate) mod parser;
-pub(crate) mod transcript;
-pub(crate) mod orphan;
-pub(crate) mod retention;
 pub mod manager;
+pub(crate) mod orphan;
+pub(crate) mod parser;
+pub(crate) mod retention;
+pub(crate) mod session;
+pub(crate) mod transcript;
 pub use manager::RunManager;
 
 /// Public entry-point for the retention pruner sweep, exposed for integration

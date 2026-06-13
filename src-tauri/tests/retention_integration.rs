@@ -16,7 +16,6 @@
 /// ```sh
 /// cargo test --manifest-path src-tauri/Cargo.toml --test retention_integration
 /// ```
-
 use dev_dashboard_lib::runs::{prune_runs, Run, RunStatus};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -172,10 +171,7 @@ async fn it_rp_04_size_cap_deletes_oldest_first() {
         run_b.exists(),
         "run-b must survive — 400 MB remaining is within 500 MB cap"
     );
-    assert!(
-        run_c.exists(),
-        "run-c (newest) must survive"
-    );
+    assert!(run_c.exists(), "run-c (newest) must survive");
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +191,8 @@ async fn it_rp_05_all_terminal_statuses_pruned_by_age() {
     let stopped_dir = runs_dir.join("run-stopped");
 
     write_meta(&completed_dir, "run-completed", RunStatus::Completed, 31);
-    write_meta(&failed_dir,    "run-failed",    RunStatus::Failed,    31);
-    write_meta(&stopped_dir,   "run-stopped",   RunStatus::Stopped,   31);
+    write_meta(&failed_dir, "run-failed", RunStatus::Failed, 31);
+    write_meta(&stopped_dir, "run-stopped", RunStatus::Stopped, 31);
 
     prune_runs(&[project_path], 30, 500).await;
 
@@ -248,18 +244,12 @@ async fn it_rp_07_multiple_projects_pruned_independently() {
     let run_dir_b = proj_b.join(".claude").join("runs").join("run-b");
 
     write_meta(&run_dir_a, "run-a", RunStatus::Completed, 31);
-    write_meta(&run_dir_b, "run-b", RunStatus::Failed,    31);
+    write_meta(&run_dir_b, "run-b", RunStatus::Failed, 31);
 
     prune_runs(&[proj_a, proj_b], 30, 500).await;
 
-    assert!(
-        !run_dir_a.exists(),
-        "project A's old run must be deleted"
-    );
-    assert!(
-        !run_dir_b.exists(),
-        "project B's old run must be deleted"
-    );
+    assert!(!run_dir_a.exists(), "project A's old run must be deleted");
+    assert!(!run_dir_b.exists(), "project B's old run must be deleted");
 }
 
 // ---------------------------------------------------------------------------
@@ -301,8 +291,5 @@ async fn it_rp_08_size_pruning_preserves_oldest_first_order() {
         run_b.exists(),
         "run-b (middle, 2 days) must survive — 400 MB ≤ 500 MB cap after run-a deletion"
     );
-    assert!(
-        run_c.exists(),
-        "run-c (newest, 1 day) must survive"
-    );
+    assert!(run_c.exists(), "run-c (newest, 1 day) must survive");
 }

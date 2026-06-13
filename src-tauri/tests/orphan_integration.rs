@@ -22,7 +22,6 @@
 /// ```sh
 /// cargo test --manifest-path src-tauri/Cargo.toml --test orphan_integration
 /// ```
-
 use dev_dashboard_lib::runs::{reap_orphans, Run, RunStatus};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -76,8 +75,21 @@ fn read_meta(run_dir: &Path) -> Run {
 #[cfg(target_os = "windows")]
 fn long_running_cmd() -> (PathBuf, Vec<String>) {
     // cmd.exe: guaranteed present; sysinfo can read its exe without elevation.
+    // Use `ping` as the long-runner rather than `timeout`: `timeout` aborts
+    // immediately ("Input redirection is not supported") when stdin is
+    // redirected to null, which these tests do. `ping -n 61` keeps the process
+    // alive for ~60s without reading stdin.
     let exe = PathBuf::from(r"C:\Windows\System32\cmd.exe");
-    (exe, vec!["/c".to_string(), "timeout".to_string(), "/t".to_string(), "60".to_string(), "/nobreak".to_string()])
+    (
+        exe,
+        vec![
+            "/c".to_string(),
+            "ping".to_string(),
+            "-n".to_string(),
+            "61".to_string(),
+            "127.0.0.1".to_string(),
+        ],
+    )
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -95,7 +107,10 @@ fn long_running_cmd() -> (PathBuf, Vec<String>) {
 async fn it_or_01_pending_dead_pid_marked_failed() {
     let tmp = TempDir::new().expect("tempdir");
     let project_path = tmp.path().to_path_buf();
-    let run_dir = project_path.join(".claude").join("runs").join("run-pending");
+    let run_dir = project_path
+        .join(".claude")
+        .join("runs")
+        .join("run-pending");
 
     // PID 9_999_999 is astronomically unlikely to be alive.
     write_meta(&run_dir, "run-pending", RunStatus::Pending, Some(9_999_999));
@@ -128,7 +143,10 @@ async fn it_or_01_pending_dead_pid_marked_failed() {
 async fn it_or_02_running_dead_pid_marked_failed() {
     let tmp = TempDir::new().expect("tempdir");
     let project_path = tmp.path().to_path_buf();
-    let run_dir = project_path.join(".claude").join("runs").join("run-running");
+    let run_dir = project_path
+        .join(".claude")
+        .join("runs")
+        .join("run-running");
 
     write_meta(&run_dir, "run-running", RunStatus::Running, Some(9_999_999));
 
@@ -203,10 +221,7 @@ async fn it_or_03_live_matching_process_killed_and_meta_failed() {
         matches!(meta.status, RunStatus::Failed),
         "meta.json must be Failed after reaper kills the process"
     );
-    assert_eq!(
-        meta.note.as_deref(),
-        Some("Terminated (app restarted)"),
-    );
+    assert_eq!(meta.note.as_deref(), Some("Terminated (app restarted)"),);
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +251,10 @@ async fn it_or_04_live_mismatched_exe_not_killed_run_marked_failed() {
 
     let tmp = TempDir::new().expect("tempdir");
     let project_path = tmp.path().to_path_buf();
-    let run_dir = project_path.join(".claude").join("runs").join("run-mismatch");
+    let run_dir = project_path
+        .join(".claude")
+        .join("runs")
+        .join("run-mismatch");
     write_meta(&run_dir, "run-mismatch", RunStatus::Running, Some(pid));
 
     // Use a cli_path that does NOT match the spawned exe.
@@ -258,10 +276,7 @@ async fn it_or_04_live_mismatched_exe_not_killed_run_marked_failed() {
         matches!(meta.status, RunStatus::Failed),
         "run must be marked Failed even when the process is not killed (conservative)"
     );
-    assert_eq!(
-        meta.note.as_deref(),
-        Some("Terminated (app restarted)"),
-    );
+    assert_eq!(meta.note.as_deref(), Some("Terminated (app restarted)"),);
 
     // Clean up: kill the child so it doesn't linger after the test.
     let _ = child.kill();
@@ -382,8 +397,14 @@ async fn it_or_08_multiple_projects_all_orphans_marked() {
     let meta_a = read_meta(&run_dir_a);
     let meta_b = read_meta(&run_dir_b);
 
-    assert!(matches!(meta_a.status, RunStatus::Failed), "project A run must be Failed");
-    assert!(matches!(meta_b.status, RunStatus::Failed), "project B run must be Failed");
+    assert!(
+        matches!(meta_a.status, RunStatus::Failed),
+        "project A run must be Failed"
+    );
+    assert!(
+        matches!(meta_b.status, RunStatus::Failed),
+        "project B run must be Failed"
+    );
 
     assert_eq!(meta_a.note.as_deref(), Some("Terminated (app restarted)"));
     assert_eq!(meta_b.note.as_deref(), Some("Terminated (app restarted)"));
@@ -402,11 +423,11 @@ async fn it_or_09_mixed_statuses_only_inflight_marked() {
     let runs_dir = project_path.join(".claude").join("runs");
 
     let dirs = [
-        ("r-pending",   RunStatus::Pending),
-        ("r-running",   RunStatus::Running),
-        ("r-failed",    RunStatus::Failed),
+        ("r-pending", RunStatus::Pending),
+        ("r-running", RunStatus::Running),
+        ("r-failed", RunStatus::Failed),
         ("r-completed", RunStatus::Completed),
-        ("r-stopped",   RunStatus::Stopped),
+        ("r-stopped", RunStatus::Stopped),
     ];
 
     for (name, status) in &dirs {
@@ -415,11 +436,26 @@ async fn it_or_09_mixed_statuses_only_inflight_marked() {
 
     reap_orphans(&[project_path], None).await;
 
-    assert!(matches!(read_meta(&runs_dir.join("r-pending")).status,   RunStatus::Failed));
-    assert!(matches!(read_meta(&runs_dir.join("r-running")).status,   RunStatus::Failed));
-    assert!(matches!(read_meta(&runs_dir.join("r-failed")).status,    RunStatus::Failed));   // was already Failed
-    assert!(matches!(read_meta(&runs_dir.join("r-completed")).status, RunStatus::Completed));
-    assert!(matches!(read_meta(&runs_dir.join("r-stopped")).status,   RunStatus::Stopped));
+    assert!(matches!(
+        read_meta(&runs_dir.join("r-pending")).status,
+        RunStatus::Failed
+    ));
+    assert!(matches!(
+        read_meta(&runs_dir.join("r-running")).status,
+        RunStatus::Failed
+    ));
+    assert!(matches!(
+        read_meta(&runs_dir.join("r-failed")).status,
+        RunStatus::Failed
+    )); // was already Failed
+    assert!(matches!(
+        read_meta(&runs_dir.join("r-completed")).status,
+        RunStatus::Completed
+    ));
+    assert!(matches!(
+        read_meta(&runs_dir.join("r-stopped")).status,
+        RunStatus::Stopped
+    ));
 
     // Confirm the pre-existing Failed run was NOT rewritten (its note is still None).
     assert!(
@@ -452,8 +488,5 @@ async fn it_or_10_no_cli_path_kill_skipped_run_still_failed() {
         matches!(meta.status, RunStatus::Failed),
         "run must be marked Failed even when cli_path is None"
     );
-    assert_eq!(
-        meta.note.as_deref(),
-        Some("Terminated (app restarted)"),
-    );
+    assert_eq!(meta.note.as_deref(), Some("Terminated (app restarted)"),);
 }
