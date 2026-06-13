@@ -3,7 +3,7 @@ name: CI
 
 on:
   push:
-    branches-ignore: []   # all branches
+    branches: ['**']   # all branches
   pull_request:
     branches: [master]
 
