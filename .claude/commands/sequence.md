@@ -26,6 +26,7 @@ You are the orchestrator for a process sequence.
    - `review-fix-loop` / `review` → `.claude/sequences/11-review-fix-loop.md`
    - `monitoring-rollout` / `monitoring` → `.claude/sequences/12-monitoring-rollout.md`
    - `epic-execution` / `epic` → `.claude/sequences/13-epic-execution.md`
+   - `project-adoption` / `adopt` / `onboard` → `.claude/sequences/14-project-adoption.md`
 3. If no argument or no match: list available sequences and stop.
 4. Read the matching sequence file in full.
 5. Verify the **Inputs** listed in the sequence are present. If any are missing, ask the user before starting.

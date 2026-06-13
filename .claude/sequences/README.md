@@ -26,7 +26,7 @@ Examples:
 /sequence refactor
 ```
 
-Aliases accepted: `task` → `task-feature`, `epic` → `epic-execution`, `bug` → `bug-fix`, `kb` → `kb-curation`, `dep` → `dep-cve-patch`, `backfill` → `test-backfill`, `review` → `review-fix-loop`, `monitoring` → `monitoring-rollout`.
+Aliases accepted: `task` → `task-feature`, `epic` → `epic-execution`, `bug` → `bug-fix`, `kb` → `kb-curation`, `dep` → `dep-cve-patch`, `backfill` → `test-backfill`, `review` → `review-fix-loop`, `monitoring` → `monitoring-rollout`, `adopt` / `onboard` → `project-adoption`.
 
 ### Tech-decision mode
 
@@ -53,21 +53,12 @@ Run `/sequence` with no name to get the list of available sequences.
 
 You can also run a sequence by hand without the slash command — just open the file and invoke each agent yourself in the order listed. The slash command is sugar.
 
-## Activity log
-
-Every agent and the orchestrator append to `DevTeam.log` at the project root. Format:
-
-```
-[<ISO-8601 UTC timestamp>] [<agent-name>] [<short title>] <one-line description>
-```
-
-Use it to scan what the team did across a session: who acted, when, what they produced or surfaced. Tail it with `tail -f DevTeam.log` during a long run.
-
 ## Quick map
 
 | Situation | Sequence |
 |---|---|
 | Brand new project, nothing defined yet | `01-pre-project` |
+| Existing project (code/docs) → canonical spec | `14-project-adoption` |
 | Spec is locked, time to scaffold | `02-bootstrap` |
 | Dev works, need to ship to real users | `03-prod-infra` |
 | Build a single feature / Task | `04-task-feature` |
@@ -83,10 +74,16 @@ Use it to scan what the team did across a session: who acted, when, what they pr
 
 ## Typical project lifecycle
 
+Two entry points feed the same downstream flow:
+
 ```
-01-pre-project   →   02-bootstrap   →   03-prod-infra
-                                              ↓
-                  ┌───────────────────────────┴────────────────────────┐
+01-pre-project                  ─┐
+                                 ├─►   02-bootstrap   →   03-prod-infra
+14-project-adoption (existing) ──┘                              ↓
+                                 │                              │
+            (gap-Tasks from 14 feed straight into 04/13) ───────┤
+                                                                ↓
+                  ┌─────────────────────────────────────────────┴──────┐
                   ↓                                                    ↓
         04-task-feature                                         05-evolution
         (per Task in initial backlog)                           (per change request)
@@ -104,11 +101,14 @@ Use it to scan what the team did across a session: who acted, when, what they pr
 
 `11-review-fix-loop` is a **subroutine** — never run alone. Called by 02, 03, 04, 05, 06, 08, 09.
 
+`14-project-adoption` is the **alternate entry point** when code/docs already exist. It produces the same canonical artifacts as `01-pre-project` (Requirements, UI/UX, KB, Epics/Tasks). After it, `02-bootstrap` may be skippable if the project is already runnable — gap-Tasks emitted by 14 close the rest via `04`/`13`.
+
 ## How to pick
 
 1. **Greenfield or existing app?**
    - Greenfield, no spec → start at `01`.
-   - Existing app → skip to one of `04`–`12`.
+   - Existing app **without** canonical `docs/kb/` + `docs/epics/` → start at `14` (adoption).
+   - Existing app **with** canonical spec → skip to one of `04`–`12`.
 2. **Bug or feature?**
    - Reported bug, local scope → `06`.
    - New behavior, design impact → `05` (then `04` per Task).

@@ -43,6 +43,21 @@ Final deliverable: a requirements document with sections:
 
 Ask one focused question at a time. Do not assume — if unclear, ask.
 
+## Adoption mode
+
+When invoked with `adoption=true` (from `14-project-adoption`):
+
+- A **Discovery Report** path is passed in. Read it first.
+- A list of classified existing docs is passed in. Read them.
+- **Pre-populate** the Requirements doc from observed code + existing docs before asking anything:
+  - Actions inferred from routes / handlers / CLI commands / UI entry points.
+  - Goal + priorities inferred from README / mission / existing prose.
+  - Per-action data/timing/behavior/result inferred from handler signatures, validation, response shapes, persisted state.
+- Mark every inferred field with `> [adoption-assumption] <one-line basis>` so the user can verify in one pass.
+- **Interview only on gaps and contradictions** — missing actions, ambiguous priorities, code-vs-prose conflicts. Do not re-ask things that are clearly answered by code.
+- Same gap rules: business gaps escalate to user; technical gaps follow `tech-decision-mode`.
+- Output goes to canonical path `docs/requirements.md`.
+
 ## Logging
 
 After every meaningful action, append one line to `DevTeam.log` at the project root, using this exact format:

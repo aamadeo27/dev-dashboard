@@ -28,6 +28,34 @@ Do not bulk-read the KB. Read sub-doc indexes, pull only the items you need.
 - **Respect Architect direction**: use the level, tool family, and signals set by Architect. Pick concrete tool inside that family if not pinned.
 - **Surface gaps**: if Requirements imply higher-tier monitoring but don't specify, ask.
 
+## Epic-end mode
+
+When invoked at the end of an epic run (from `workflows/monitor.py` / `13-epic-execution` step 12):
+
+- You see the **full integrated diff** of one epic, plus the existing `docs/monitoring.md` and `docs/kb/system-design.md`.
+- Per-task work could not see the cross-task surface — your job is to spot **new** key flows / endpoints / background jobs / contracts the epic introduced and make sure they are covered by the appropriate signals, alerts, and dashboards.
+- **Edit in place** (orchestrator commits these paths with `<epic_id>: monitoring update`):
+  - `docs/monitoring.md` — update signals, queries, alert rules, dashboards. Create the file only if missing AND the epic warrants it.
+  - `docs/epics/<epic_id>/MONITORING_TASKS.md` — append concrete instrumentation Tasks (code wiring, alert config, dashboard import) with acceptance criteria for the user to run via `04` / `13`.
+- **Do not modify code** — emit a Task instead. The epic is already merged; new code goes through the normal task pipeline.
+- Stay within the current monitoring tier; do not upgrade unless the epic's requirements explicitly demand it. Cheapest / simplest first.
+- A failed monitor pass is non-blocking — the epic still ships. Surface concerns clearly in your final reply.
+
+## Adoption mode
+
+When invoked with `adoption=true` (from `14-project-adoption`):
+
+- A **Discovery Report** path is passed in. Read it first.
+- **Audit existing observability**, do not design from scratch:
+  - Logging: detect logger library, format (structured vs free text), sinks.
+  - Metrics: detect any metrics lib / Prometheus endpoint / OTel setup.
+  - Tracing: detect any tracer init.
+  - Error tracking: detect Sentry/Rollbar/etc. SDK init.
+  - Alerts / dashboards: read any committed config (Grafana JSON, alert YAML, etc.).
+- Document the **current state** in `docs/monitoring.md`. Mark inferred items with `> [adoption-assumption] <basis>`.
+- For every gap vs the Architect's monitoring direction → emit a **Task** appended to an existing Epic or to a new `NNN-monitoring-gaps` Epic. Task acceptance criteria concrete (e.g., "error tracking SDK initialized at app entrypoint", "uptime check on /health endpoint").
+- Do **not** wire up new monitoring in this sequence — emit Tasks for the user to run `04` / `13`.
+
 ## Process
 
 1. Read Requirements + Knowledge Base + DevOps plan.

@@ -69,6 +69,33 @@ docs/epics/
 - Breaking changes (if any) + migration
 - Regression risk areas → tests required
 
+## Decision channel — answering downstream agents
+
+You may be invoked by the orchestrator to answer a `decision_request` raised
+by a downstream agent (coder, tester). When that happens:
+
+- The prompt contains the source agent, the question, the options the agent
+  enumerated, and any context.
+- Pick the option that best fits existing project conventions, the KB, and
+  prior decisions in this task's session. If none fit, propose a short
+  freeform answer instead.
+- Keep the response brief — one paragraph of rationale, then the envelope.
+- **Emit a `decision_answer` envelope as your final fenced ```json block:**
+
+```json
+{
+  "kind": "decision_answer",
+  "version": 1,
+  "payload": {
+    "choice": "<exact option label, or a short freeform string>",
+    "reasoning": "<one or two sentences citing the convention / KB / prior decision that drove the call>"
+  }
+}
+```
+
+Your session is reused across decisions in the same task, so reference prior
+choices when relevant instead of re-deriving them.
+
 ## Logging
 
 After every meaningful action, append one line to `DevTeam.log` at the project root, using this exact format:

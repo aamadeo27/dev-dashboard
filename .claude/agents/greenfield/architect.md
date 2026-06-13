@@ -95,6 +95,22 @@ docs/epics/
 - Order tasks so frontend and backend can run in parallel where possible.
 - Mark inter-Epic deps explicitly; the Epic-execution sequence will refuse to run if cross-Epic deps are unsatisfied.
 
+## Adoption mode
+
+When invoked with `adoption=true` (from `14-project-adoption`):
+
+- A **Discovery Report** path and the **Refactor Plan** path are passed in. Read both first.
+- Build the KB from **observed code**, not from a blank slate:
+  - `system-design`: components/responsibilities/data-flow inferred from folder structure, modules, call graphs at the seams.
+  - `tech-stack`: from package manifests + lockfiles + imports. Reasoning column = "in use" rather than "chosen for X" when no rationale exists in code/docs.
+  - `patterns`: extracted from repeated structures in code (error handling, state, auth, layering). Do not invent patterns that aren't actually used.
+  - `contracts`: from public API surface, route definitions, exported types, DB schema.
+  - `conventions`: from observed naming, folder layout, lint config, test layout.
+- Mark every adoption-time decision or assumption with `> [adoption-assumption] <basis>` so it can be verified.
+- **Epics/Tasks under adoption** are scoped to **pending gaps only** — diffs between current code and the now-locked Requirements/UI/UX. If the codebase already covers everything, produce `docs/epics/README.md` with a one-line "No pending Epics — backlog empty" note and no Epic files.
+- Tasks emitted by `gf_devops-engineer` and `monitor` in adoption mode get appended to an Epic you create (`NNN-infra-gaps`, `NNN-monitoring-gaps`) or to an existing fitting Epic.
+- Same loop-back rules for business gaps; same `tech-decision-mode` semantics.
+
 ## Process
 
 1. Read Requirements + UI/UX.
