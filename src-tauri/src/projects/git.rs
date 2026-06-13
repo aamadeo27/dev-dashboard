@@ -1,10 +1,10 @@
 // GitPoller — per-project git status polling
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Payload emitted on the `git:updated` event for a single project.
 #[derive(serde::Serialize, Clone)]
@@ -73,17 +73,19 @@ pub fn start(
     // Sets paused = !focused so the poll loop resets its elapsed counter within
     // the next 500 ms tick after a blur event.
     let paused_for_event = poller.paused.clone();
-    app_handle.on_window_event(move |_window, event| {
-        if let tauri::WindowEvent::Focused(focused) = event {
-            // paused = true when NOT focused; inverted polarity vs cli_watcher's is_focused
-            paused_for_event.store(!focused, Ordering::Relaxed);
-            tracing::debug!(
-                component = "git_poller",
-                state = if *focused { "focused" } else { "blurred" },
-                "window focus changed"
-            );
-        }
-    });
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                // paused = true when NOT focused; inverted polarity vs cli_watcher's is_focused
+                paused_for_event.store(!focused, Ordering::Relaxed);
+                tracing::debug!(
+                    component = "git_poller",
+                    state = if *focused { "focused" } else { "blurred" },
+                    "window focus changed"
+                );
+            }
+        });
+    }
 
     tokio::spawn(async move {
         loop {
@@ -119,7 +121,8 @@ pub fn start(
             // Acquire the projects mutex ONCE and collect all (id, path) pairs.
             let id_paths: Vec<(String, std::path::PathBuf)> = {
                 let registry = projects.lock().await;
-                visible_ids.iter()
+                visible_ids
+                    .iter()
                     .filter_map(|id| registry.get_project_path(id).map(|p| (id.clone(), p)))
                     .collect()
             };
@@ -141,7 +144,10 @@ pub fn start(
                     Ok((id, status)) => {
                         let _ = app_handle.emit(
                             crate::ipc::events::GIT_UPDATED,
-                            GitUpdatedPayload { id: id.clone(), status: status.clone() },
+                            GitUpdatedPayload {
+                                id: id.clone(),
+                                status: status.clone(),
+                            },
                         );
                         cache.insert(id, status);
                     }
@@ -159,7 +165,10 @@ pub fn start(
 /// Uses `.chars().take(max_chars)` — safe for all UTF-8 input because it
 /// operates on char boundaries, not byte offsets.
 fn sanitize_git_string(s: &str, max_chars: usize) -> String {
-    s.chars().filter(|c| !c.is_control()).take(max_chars).collect()
+    s.chars()
+        .filter(|c| !c.is_control())
+        .take(max_chars)
+        .collect()
 }
 
 /// Computes git status synchronously via git2. Must be called via `spawn_blocking`.
@@ -182,7 +191,7 @@ pub fn git_status_for_path(path: &std::path::Path) -> GitStatus {
                 behind: 0,
                 last_polled: now,
                 error: Some(error_msg),
-            }
+            };
         }
     };
 
@@ -258,7 +267,10 @@ mod tests {
         );
         // Safe defaults.
         assert!(status.is_clean, "is_clean must default to true on error");
-        assert_eq!(status.dirty_files, 0, "dirty_files must default to 0 on error");
+        assert_eq!(
+            status.dirty_files, 0,
+            "dirty_files must default to 0 on error"
+        );
         assert_eq!(status.ahead, 0, "ahead must default to 0 on error");
         assert_eq!(status.behind, 0, "behind must default to 0 on error");
         assert!(status.branch.is_none(), "branch must be None on error");
@@ -297,11 +309,17 @@ mod tests {
         let poller = GitPoller::new();
 
         let statuses = poller.statuses.lock().await;
-        assert!(statuses.is_empty(), "statuses cache must be empty on construction");
+        assert!(
+            statuses.is_empty(),
+            "statuses cache must be empty on construction"
+        );
         drop(statuses);
 
         let visible = poller.visible.lock().await;
-        assert!(visible.is_empty(), "visible set must be empty on construction");
+        assert!(
+            visible.is_empty(),
+            "visible set must be empty on construction"
+        );
         drop(visible);
 
         assert!(
@@ -347,7 +365,10 @@ mod tests {
             let visible = poller.visible.lock().await;
             assert!(!visible.contains("id-a"), "id-a must be gone after replace");
             assert!(!visible.contains("id-b"), "id-b must be gone after replace");
-            assert!(visible.contains("id-c"), "id-c must be present after replace");
+            assert!(
+                visible.contains("id-c"),
+                "id-c must be present after replace"
+            );
             assert_eq!(visible.len(), 1);
         }
     }
@@ -373,7 +394,10 @@ mod tests {
             }
         }
         // After the pause-reset the counter restarts: 3 * 500 = 1500
-        assert_eq!(unpaused_ms, 1500, "counter must restart from zero after pause");
+        assert_eq!(
+            unpaused_ms, 1500,
+            "counter must restart from zero after pause"
+        );
     }
 
     /// When always paused, the counter must never leave 0 (poll never fires).

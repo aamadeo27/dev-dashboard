@@ -7,7 +7,6 @@
 ///
 /// No filesystem I/O is performed. All `DateTime` values use
 /// `chrono::DateTime::UNIX_EPOCH` (1970-01-01T00:00:00Z) for determinism.
-
 use dev_dashboard_lib::ipc::commands::CliCheck;
 use dev_dashboard_lib::projects::git::GitStatus;
 use dev_dashboard_lib::projects::Project;
@@ -44,7 +43,10 @@ fn project_serializes_to_json() {
     let v = serde_json::to_value(&p).expect("Project must serialize");
     assert_eq!(v["name"], "my-project");
     assert_eq!(v["is_missing"], false);
-    assert!(v["added_at"].is_string(), "added_at should be an ISO-8601 string");
+    assert!(
+        v["added_at"].is_string(),
+        "added_at should be an ISO-8601 string"
+    );
     assert!(v["last_modified"].is_null());
 }
 
@@ -81,7 +83,10 @@ fn run_serializes_to_json() {
 fn run_status_completed_serializes_as_completed() {
     let status = RunStatus::Completed;
     let s = serde_json::to_string(&status).expect("RunStatus must serialize");
-    assert_eq!(s, "\"Completed\"", "RunStatus::Completed must serialize as \"Completed\"");
+    assert_eq!(
+        s, "\"Completed\"",
+        "RunStatus::Completed must serialize as \"Completed\""
+    );
 }
 
 #[test]
@@ -95,7 +100,10 @@ fn run_status_all_variants_use_pascal_case() {
     ];
     for (variant, expected) in &cases {
         let s = serde_json::to_string(variant).expect("serialize");
-        assert_eq!(&s, expected, "Unexpected serialization for RunStatus variant");
+        assert_eq!(
+            &s, expected,
+            "Unexpected serialization for RunStatus variant"
+        );
     }
 }
 
@@ -127,8 +135,20 @@ fn run_event_all_variants_have_correct_type_discriminator() {
     let null_val = serde_json::Value::Null;
 
     let cases: &[(&str, RunEvent)] = &[
-        ("assistant_text", RunEvent::AssistantText { text: "t".into(), ts }),
-        ("thinking", RunEvent::Thinking { text: "t".into(), ts }),
+        (
+            "assistant_text",
+            RunEvent::AssistantText {
+                text: "t".into(),
+                ts,
+            },
+        ),
+        (
+            "thinking",
+            RunEvent::Thinking {
+                text: "t".into(),
+                ts,
+            },
+        ),
         (
             "tool_call",
             RunEvent::ToolCall {
@@ -157,8 +177,20 @@ fn run_event_all_variants_have_correct_type_discriminator() {
                 ts,
             },
         ),
-        ("user_input", RunEvent::UserInput { text: "q".into(), ts }),
-        ("system", RunEvent::System { text: "s".into(), ts }),
+        (
+            "user_input",
+            RunEvent::UserInput {
+                text: "q".into(),
+                ts,
+            },
+        ),
+        (
+            "system",
+            RunEvent::System {
+                text: "s".into(),
+                ts,
+            },
+        ),
         (
             "step_failed",
             RunEvent::StepFailed {
@@ -167,7 +199,13 @@ fn run_event_all_variants_have_correct_type_discriminator() {
                 ts,
             },
         ),
-        ("error", RunEvent::Error { message: "err".into(), ts }),
+        (
+            "error",
+            RunEvent::Error {
+                message: "err".into(),
+                ts,
+            },
+        ),
     ];
 
     for (expected_type, event) in cases {
@@ -292,7 +330,10 @@ fn step_failure_choice_serializes_as_pascal_case() {
     ];
     for (variant, expected) in &cases {
         let s = serde_json::to_string(variant).expect("serialize");
-        assert_eq!(&s, expected, "Unexpected serialization for StepFailureChoice");
+        assert_eq!(
+            &s, expected,
+            "Unexpected serialization for StepFailureChoice"
+        );
     }
 }
 

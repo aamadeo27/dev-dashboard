@@ -71,7 +71,15 @@ export default function Setup() {
         setVerifyState("success");
         // FIX 5: Separate inner try/catch so updateSettings errors show a distinct message.
         try {
-          await updateSettings({ claude_cli_path: cliPath || null });
+          await updateSettings({
+            parent_dir: null,
+            claude_cli_path: cliPath || null,
+            git_poll_interval_secs: null,
+            usage_poll_interval_secs: null,
+            retention_days: null,
+            retention_size_mb: null,
+            view_mode: null,
+          });
         } catch {
           setVerifyMessage("Verified, but could not save path. Check app permissions.");
           setVerifyState("failure");
@@ -131,18 +139,14 @@ export default function Setup() {
   function renderStatusArea() {
     // FIX 6: Show "Verifying..." text during in-flight state.
     if (verifyState === "verifying") {
-      return (
-        <p style={styles.statusVerifying} role="status">
-          Verifying...
-        </p>
-      );
+      return <output style={styles.statusVerifying}>Verifying...</output>;
     }
     if (verifyState === "idle") return null;
     if (verifyState === "success") {
       return (
-        <p style={styles.statusSuccess} role="status">
+        <output style={styles.statusSuccess}>
           {"✓"} {verifyMessage}
-        </p>
+        </output>
       );
     }
     // failure

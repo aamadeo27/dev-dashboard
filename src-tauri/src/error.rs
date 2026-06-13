@@ -157,7 +157,11 @@ mod tests {
         let err = AppError::NotFound("test".into());
         let v = serde_json::to_value(&err).expect("serialize");
         let obj = v.as_object().expect("should be object");
-        assert_eq!(obj.len(), 3, "expected exactly 3 fields: code, message, details");
+        assert_eq!(
+            obj.len(),
+            3,
+            "expected exactly 3 fields: code, message, details"
+        );
         assert!(obj.contains_key("code"));
         assert!(obj.contains_key("message"));
         assert!(obj.contains_key("details"));

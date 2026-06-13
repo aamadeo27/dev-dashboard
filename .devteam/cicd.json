@@ -1,0 +1,12 @@
+{
+  "remote": "origin",
+  "integration_branch": "master",
+  "required_checks": [
+    "Check (ubuntu-latest)",
+    "Check (macos-latest)",
+    "Check (windows-latest)"
+  ],
+  "poll_interval_seconds": 15,
+  "poll_timeout_seconds": 1800,
+  "max_ci_fix_attempts": 3
+}

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use tauri::Emitter;
+
 use crate::error::{AppError, AppResult};
 
 /// Open the project directory in the OS default terminal application.
@@ -16,20 +18,19 @@ pub async fn open_in_terminal_impl(
 ) -> AppResult<()> {
     tracing::info!(component = "platform", id = ?id, path = ?path, "open_in_terminal invoked");
 
-    let result = tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| {
-        AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
-    });
+    let result = tauri_plugin_opener::open_path(&path, None::<&str>)
+        .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())));
 
     if let Err(ref e) = result {
         tracing::warn!(component = "platform", id = ?id, error = ?e, "open_in_terminal failed");
-        app.emit(crate::ipc::events::TOAST_SHOW, serde_json::json!({
-            "kind": "error",
-            "title": "Cannot open terminal",
-            "body": e.to_string(),
-        }))
+        app.emit(
+            crate::ipc::events::TOAST_SHOW,
+            serde_json::json!({
+                "kind": "error",
+                "title": "Cannot open terminal",
+                "body": e.to_string(),
+            }),
+        )
         .ok();
     }
 

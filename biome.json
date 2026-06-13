@@ -19,5 +19,15 @@
   },
   "files": {
     "ignore": ["node_modules", "dist", "src-tauri/target", "src/ipc/bindings.ts"]
-  }
+  },
+  "overrides": [
+    {
+      "include": ["**/*.test.ts", "**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "style": { "noNonNullAssertion": "off" }
+        }
+      }
+    }
+  ]
 }

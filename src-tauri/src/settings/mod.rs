@@ -97,7 +97,9 @@ impl SettingsStore {
 
         if !path.exists() {
             tracing::info!(path = %path.display(), "settings file not found; using defaults");
-            return Self { settings: Settings::default() };
+            return Self {
+                settings: Settings::default(),
+            };
         }
 
         let content = match std::fs::read_to_string(&path) {
@@ -108,7 +110,9 @@ impl SettingsStore {
                     error = %e,
                     "failed to read settings file; using defaults"
                 );
-                return Self { settings: Settings::default() };
+                return Self {
+                    settings: Settings::default(),
+                };
             }
         };
 
@@ -130,7 +134,9 @@ impl SettingsStore {
                         "failed to archive corrupt settings file"
                     );
                 }
-                Self { settings: Settings::default() }
+                Self {
+                    settings: Settings::default(),
+                }
             }
         }
     }
@@ -179,12 +185,18 @@ impl SettingsStore {
             }
             match tokio::fs::metadata(p).await {
                 Ok(meta) if meta.is_file() => {}
-                Ok(_) => return Err(AppError::InvalidInput(
-                    format!("claude_cli_path is not a file: {}", p.display())
-                )),
-                Err(_) => return Err(AppError::InvalidInput(
-                    format!("claude_cli_path does not exist: {}", p.display())
-                )),
+                Ok(_) => {
+                    return Err(AppError::InvalidInput(format!(
+                        "claude_cli_path is not a file: {}",
+                        p.display()
+                    )))
+                }
+                Err(_) => {
+                    return Err(AppError::InvalidInput(format!(
+                        "claude_cli_path does not exist: {}",
+                        p.display()
+                    )))
+                }
             }
         }
         if let Some(ref p) = patch.parent_dir {
@@ -195,9 +207,10 @@ impl SettingsStore {
             }
             if let Ok(meta) = tokio::fs::metadata(p).await {
                 if !meta.is_dir() {
-                    return Err(AppError::InvalidInput(
-                        format!("parent_dir exists but is not a directory: {}", p.display())
-                    ));
+                    return Err(AppError::InvalidInput(format!(
+                        "parent_dir exists but is not a directory: {}",
+                        p.display()
+                    )));
                 }
             }
         }
@@ -296,7 +309,10 @@ mod tests {
             ..SettingsPatch::default()
         };
 
-        store.patch(patch, dir.path()).await.expect("patch should succeed");
+        store
+            .patch(patch, dir.path())
+            .await
+            .expect("patch should succeed");
 
         assert_eq!(store.settings().git_poll_interval_secs, 120);
         assert_eq!(store.settings().usage_poll_interval_secs, 300);
@@ -377,10 +393,16 @@ mod tests {
 
         // Broken file archived.
         let broken_path = dir.path().join("settings.json.broken");
-        assert!(broken_path.exists(), "broken file should have been archived");
+        assert!(
+            broken_path.exists(),
+            "broken file should have been archived"
+        );
 
         // Original file removed (renamed away).
-        assert!(!settings_path.exists(), "original file should have been renamed");
+        assert!(
+            !settings_path.exists(),
+            "original file should have been renamed"
+        );
     }
 
     #[tokio::test]
@@ -442,7 +464,10 @@ mod tests {
             retention_days: Some(90),
             ..SettingsPatch::default()
         };
-        store.patch(patch, dir.path()).await.expect("retention_days=90 must be accepted");
+        store
+            .patch(patch, dir.path())
+            .await
+            .expect("retention_days=90 must be accepted");
         assert_eq!(store.settings().retention_days, 90);
     }
 
@@ -469,7 +494,10 @@ mod tests {
             retention_size_mb: Some(10_240),
             ..SettingsPatch::default()
         };
-        store.patch(patch, dir.path()).await.expect("retention_size_mb=10240 must be accepted");
+        store
+            .patch(patch, dir.path())
+            .await
+            .expect("retention_size_mb=10240 must be accepted");
         assert_eq!(store.settings().retention_size_mb, 10_240);
     }
 

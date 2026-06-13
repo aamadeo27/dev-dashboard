@@ -242,7 +242,15 @@ describe("Setup screen — verify success flow", () => {
     await user.click(screen.getByRole("button", { name: /verify and continue/i }));
 
     await waitFor(() => {
-      expect(updateSettings).toHaveBeenCalledWith({ claude_cli_path: "/usr/local/bin/claude" });
+      expect(updateSettings).toHaveBeenCalledWith({
+        parent_dir: null,
+        claude_cli_path: "/usr/local/bin/claude",
+        git_poll_interval_secs: null,
+        usage_poll_interval_secs: null,
+        retention_days: null,
+        retention_size_mb: null,
+        view_mode: null,
+      });
     });
   });
 

@@ -1,11 +1,11 @@
 // Integration tests for Settings route component. See docs/tasks/T1.4.md § Test scenarios.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Settings } from "../ipc/bindings";
+import type { Settings as SettingsData } from "../ipc/bindings";
 
 // ---------------------------------------------------------------------------
 // Mocks — declared before any dynamic imports
@@ -33,7 +33,7 @@ import Settings from "./Settings";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const MOCK_SETTINGS: Settings = {
+const MOCK_SETTINGS: SettingsData = {
   parent_dir: "/home/user/projects",
   claude_cli_path: "/usr/local/bin/claude",
   git_poll_interval_secs: 10,
@@ -153,7 +153,7 @@ describe("Settings screen — renders all 7 fields", () => {
 describe("Settings screen — save happy path", () => {
   it("calls updateSettings with the correct patch on save", async () => {
     vi.mocked(getSettings).mockResolvedValue(MOCK_SETTINGS);
-    const updated: Settings = { ...MOCK_SETTINGS, git_poll_interval_secs: 20 };
+    const updated: SettingsData = { ...MOCK_SETTINGS, git_poll_interval_secs: 20 };
     vi.mocked(updateSettings).mockResolvedValue(updated);
 
     const { user } = renderSettings();
