@@ -27,7 +27,6 @@
 ///     `commands.rs`.
 ///   - The `TranscriptWriter::create` integration tests (IT-T4.4-09 / -10) which
 ///     verify that `meta.json` persists `attached_md_path` correctly.
-
 use dev_dashboard_lib::ipc::commands::read_attached_md;
 use dev_dashboard_lib::runs::{Run, RunStatus};
 
@@ -302,8 +301,8 @@ async fn it_t4_4_08_binary_content_round_trips_without_corruption() {
 
     // A byte sequence that is deliberately not valid UTF-8.
     let binary: &[u8] = &[
-        0x00, 0xFF, 0xFE, 0x80, 0x01, 0x1B, b'[', b'0', b'm',
-        b'#', b' ', b'H', b'e', b'l', b'l', b'o', b'\n',
+        0x00, 0xFF, 0xFE, 0x80, 0x01, 0x1B, b'[', b'0', b'm', b'#', b' ', b'H', b'e', b'l', b'l',
+        b'o', b'\n',
     ];
     tokio::fs::write(&path, binary)
         .await
@@ -340,8 +339,7 @@ fn it_t4_4_09_run_serializes_attached_md_path_as_non_null() {
     let context_path = std::path::PathBuf::from("/tmp/context.md");
     let run = make_run("run-t4.4-09", Some(context_path.clone()));
 
-    let json = serde_json::to_string_pretty(&run)
-        .expect("Run must serialize to JSON");
+    let json = serde_json::to_string_pretty(&run).expect("Run must serialize to JSON");
     let meta: serde_json::Value =
         serde_json::from_str(&json).expect("serialized Run must parse as JSON object");
 
@@ -370,8 +368,7 @@ fn it_t4_4_09_run_serializes_attached_md_path_as_non_null() {
 fn it_t4_4_10_run_serializes_attached_md_path_as_null_when_none() {
     let run = make_run("run-t4.4-10", None);
 
-    let json = serde_json::to_string_pretty(&run)
-        .expect("Run must serialize to JSON");
+    let json = serde_json::to_string_pretty(&run).expect("Run must serialize to JSON");
     let meta: serde_json::Value =
         serde_json::from_str(&json).expect("serialized Run must parse as JSON object");
 

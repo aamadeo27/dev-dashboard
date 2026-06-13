@@ -12,8 +12,7 @@
 ///
 /// Correctness of the log output (JSON field names, log level) is verified
 /// by reading the emitted log file during manual / integration test runs.
-
-use dev_dashboard::ipc::commands::log_frontend_error;
+use dev_dashboard_lib::ipc::commands::log_frontend_error;
 
 // ---------------------------------------------------------------------------
 // TC-1: full arguments — message + stack + route
@@ -39,12 +38,7 @@ async fn log_frontend_error_full_args_does_not_panic() {
 /// must complete without panicking.
 #[tokio::test]
 async fn log_frontend_error_message_only_does_not_panic() {
-    log_frontend_error(
-        "Unhandled promise rejection".to_string(),
-        None,
-        None,
-    )
-    .await;
+    log_frontend_error("Unhandled promise rejection".to_string(), None, None).await;
 }
 
 // ---------------------------------------------------------------------------

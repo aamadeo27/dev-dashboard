@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use crate::error::{AppError, AppResult};
 
@@ -86,9 +87,11 @@ impl SequenceLoader {
             }
         }
 
-        // Cache miss or invalidation — re-scan.
-        let _span = tracing::info_span!("SequenceLoader::load_all", project_id = %project_id).entered();
-        let sequences = scan_sequences_dir(&seq_dir).await?;
+        // Cache miss or invalidation — re-scan. Use `.instrument()` rather than
+        // `.entered()` so no `!Send` span guard is held across the await (the
+        // load_all future must be Send to be usable as a Tauri command).
+        let span = tracing::info_span!("SequenceLoader::load_all", project_id = %project_id);
+        let sequences = scan_sequences_dir(&seq_dir).instrument(span).await?;
 
         tracing::info!(
             component = "sequence_loader",
@@ -129,7 +132,7 @@ fn system_time_to_utc(st: std::time::SystemTime) -> DateTime<Utc> {
 }
 
 /// Maximum size of a sequence file we are willing to read (1 MiB).
-const MAX_SEQ_FILE_BYTES: u64 = 1 * 1024 * 1024;
+const MAX_SEQ_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Read all `*.md` files in `seq_dir`, parse each into a `Sequence`, sort by
 /// name, and return the result.
@@ -347,7 +350,10 @@ mod tests {
     #[test]
     fn description_trims_whitespace_from_line() {
         let content = "# Title\n\n   Description with leading spaces.   \n";
-        assert_eq!(extract_description(content), "Description with leading spaces.");
+        assert_eq!(
+            extract_description(content),
+            "Description with leading spaces."
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -547,7 +553,11 @@ mod tests {
 
         // A second load of proj-a must not pick up proj-b's sequences.
         let seqs_a_again = loader.load_all("proj-a", &project_path_a).await.unwrap();
-        assert_eq!(seqs_a_again.len(), 1, "cached proj-a must still have 1 sequence");
+        assert_eq!(
+            seqs_a_again.len(),
+            1,
+            "cached proj-a must still have 1 sequence"
+        );
     }
 
     /// The `name` field of a returned Sequence equals the filename stem with

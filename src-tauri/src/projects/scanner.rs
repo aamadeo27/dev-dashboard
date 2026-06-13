@@ -135,7 +135,11 @@ mod tests {
         touch(&dir, "Cargo.toml");
         touch(&dir, "package.json");
         let (lang, pm) = detect(dir.path());
-        assert_eq!(lang.as_deref(), Some("rust"), "Cargo.toml must win over package.json");
+        assert_eq!(
+            lang.as_deref(),
+            Some("rust"),
+            "Cargo.toml must win over package.json"
+        );
         assert_eq!(pm.as_deref(), Some("cargo"));
     }
 

@@ -33,7 +33,6 @@
 /// If in the future `verify_cli_spawn_logic` is extracted to a plain async fn
 /// that accepts a `PathBuf` and returns `CliCheck`, it can be tested here
 /// directly with a real temp-script on the OS.
-
 use dev_dashboard_lib::ipc::commands::resolve_cli_path;
 use std::path::PathBuf;
 

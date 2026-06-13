@@ -27,7 +27,6 @@
 /// Running the suite with `cargo test -- --test-threads=1` also works, but
 /// the mutex approach allows the test binary to keep its default thread count
 /// without flakiness.
-
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -94,7 +93,10 @@ fn config_dir_env_var_is_not_modified() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     let saved = std::env::var(ENV_VAR).ok();
-    let raw = std::env::temp_dir().join("some").join("custom").join("path");
+    let raw = std::env::temp_dir()
+        .join("some")
+        .join("custom")
+        .join("path");
     std::env::set_var(ENV_VAR, &raw);
 
     let result = resolve_config_dir();
@@ -159,7 +161,11 @@ fn config_dir_default_is_absolute() {
         None => {}
     }
 
-    assert!(result.is_absolute(), "config dir must be absolute, got: {}", result.display());
+    assert!(
+        result.is_absolute(),
+        "config dir must be absolute, got: {}",
+        result.display()
+    );
 }
 
 // ---------------------------------------------------------------------------

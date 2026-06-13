@@ -75,9 +75,7 @@ pub async fn validate_cli_path(path: &std::path::Path) -> Result<(), String> {
     {
         let s = path.to_string_lossy();
         if s.starts_with("\\\\") || s.starts_with("//") {
-            return Err(
-                "path_override must not be a UNC or network path".to_string()
-            );
+            return Err("path_override must not be a UNC or network path".to_string());
         }
     }
 
@@ -168,11 +166,9 @@ pub async fn verify_claude_cli(
             })
         }
         Ok(child) => {
-            let output_result = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                child.wait_with_output(),
-            )
-            .await;
+            let output_result =
+                tokio::time::timeout(std::time::Duration::from_secs(10), child.wait_with_output())
+                    .await;
 
             match output_result {
                 Err(_) => {
@@ -220,12 +216,13 @@ pub async fn verify_claude_cli(
                     let version: Option<String> = if raw.is_empty() {
                         None
                     } else {
-                        let capped: String = raw
-                            .chars()
-                            .filter(|c| !c.is_control())
-                            .take(256)
-                            .collect();
-                        if capped.is_empty() { None } else { Some(capped) }
+                        let capped: String =
+                            raw.chars().filter(|c| !c.is_control()).take(256).collect();
+                        if capped.is_empty() {
+                            None
+                        } else {
+                            Some(capped)
+                        }
                     };
 
                     tracing::info!(
@@ -257,16 +254,14 @@ pub async fn ping() -> Result<String, String> {
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn ping_error() -> AppResult<String> {
-    Err(crate::error::AppError::NotFound("ping_error_test".to_string()))
+    Err(crate::error::AppError::NotFound(
+        "ping_error_test".to_string(),
+    ))
 }
 
 /// Forwards a frontend error into the structured log (monitoring.md §1.3k).
 #[tauri::command]
-pub async fn log_frontend_error(
-    message: String,
-    stack: Option<String>,
-    route: Option<String>,
-) {
+pub async fn log_frontend_error(message: String, stack: Option<String>, route: Option<String>) {
     // Sanitize fields: cap length and strip control chars (< 0x20 except \t, plus 0x7F).
     // `message` also strips \n to prevent log-line forging in line-oriented log sinks.
     // `stack` keeps \n so multi-line stack traces remain readable.
@@ -278,8 +273,8 @@ pub async fn log_frontend_error(
     };
 
     let message = sanitize(&message, 4096, false);
-    let stack   = stack.as_deref().map(|s| sanitize(s, 8192, true));
-    let route   = route.as_deref().map(|s| sanitize(s, 512, false));
+    let stack = stack.as_deref().map(|s| sanitize(s, 8192, true));
+    let route = route.as_deref().map(|s| sanitize(s, 512, false));
 
     let correlation_id = uuid::Uuid::new_v4().to_string();
     tracing::error!(
@@ -319,9 +314,7 @@ pub async fn open_logs_folder(state: tauri::State<'_, AppState>) -> AppResult<()
     // Ensure the directory exists so the opener has something to show.
     tokio::fs::create_dir_all(&logs_dir).await?;
     tauri_plugin_opener::open_path(logs_dir, None::<&str>)
-        .map_err(|e| crate::error::AppError::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-        ))
+        .map_err(|e| crate::error::AppError::Io(std::io::Error::other(e.to_string())))
 }
 
 // ---------------------------------------------------------------------------
@@ -351,10 +344,7 @@ pub async fn add_project(
 
 /// Remove a project by id. Returns `NotFound` if no project has that id.
 #[tauri::command]
-pub async fn remove_project(
-    id: String,
-    state: tauri::State<'_, AppState>,
-) -> AppResult<()> {
+pub async fn remove_project(id: String, state: tauri::State<'_, AppState>) -> AppResult<()> {
     let mut registry = state.projects.lock().await;
     registry.remove_project(&id).await
 }
@@ -405,10 +395,7 @@ pub async fn rename_project(
 /// Returns the updated `Project`. Returns `AppError::NotFound` if no project
 /// has the given id.
 #[tauri::command]
-pub async fn scan_project(
-    id: String,
-    state: tauri::State<'_, AppState>,
-) -> AppResult<Project> {
+pub async fn scan_project(id: String, state: tauri::State<'_, AppState>) -> AppResult<Project> {
     let mut registry = state.projects.lock().await;
     registry.scan_project(&id).await
 }
@@ -441,12 +428,12 @@ pub async fn set_visible_projects(
 ) -> AppResult<()> {
     if ids.len() > 1024 {
         return Err(crate::error::AppError::InvalidInput(
-            "set_visible_projects: too many ids (max 1024)".to_string()
+            "set_visible_projects: too many ids (max 1024)".to_string(),
         ));
     }
     if ids.iter().any(|id| id.len() > 128) {
         return Err(crate::error::AppError::InvalidInput(
-            "set_visible_projects: id too long (max 128 chars)".to_string()
+            "set_visible_projects: id too long (max 128 chars)".to_string(),
         ));
     }
     let mut visible = state.git_poller.visible.lock().await;
@@ -596,16 +583,14 @@ pub fn is_valid_sequence_name(name: &str) -> bool {
         return false;
     }
     // Reject `..`, `.`, and empty segments (produced by leading/trailing/consecutive `/`).
-    if name.split('/').any(|seg| seg == ".." || seg == "." || seg.is_empty()) {
+    if name
+        .split('/')
+        .any(|seg| seg == ".." || seg == "." || seg.is_empty())
+    {
         return false;
     }
     name.chars().all(|c| {
-        c.is_ascii_alphanumeric()
-            || c == '.'
-            || c == '_'
-            || c == '-'
-            || c == '/'
-            || c == ' '
+        c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == '/' || c == ' '
     })
 }
 
@@ -744,12 +729,14 @@ pub async fn launch_run(
     let mut child = cmd.spawn().map_err(AppError::Io)?;
 
     let mut child_stdin = child.stdin.take();
-    let child_stdout = child.stdout.take().ok_or_else(|| {
-        AppError::Internal("child stdout handle missing after spawn".to_string())
-    })?;
-    let child_stderr = child.stderr.take().ok_or_else(|| {
-        AppError::Internal("child stderr handle missing after spawn".to_string())
-    })?;
+    let child_stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Internal("child stdout handle missing after spawn".to_string()))?;
+    let child_stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::Internal("child stderr handle missing after spawn".to_string()))?;
 
     // ── 7b. Write attached_md content to child stdin (first write) ─────────────
     // The content was read and validated before spawn (step 1c).  Writing it here,
@@ -821,7 +808,8 @@ pub async fn launch_run(
         sessions: sessions.clone(),
         input_rx,
     };
-    let _ = tokio::task::spawn(
+    // Detached background task; the JoinHandle is intentionally dropped.
+    tokio::task::spawn(
         crate::runs::session::run_io_loop(app_handle, run_id.clone(), ctx).instrument(span),
     );
 
@@ -842,10 +830,7 @@ pub async fn launch_run(
 ///
 /// Returns `AppError::NotFound` if no active run has the given id.
 #[tauri::command]
-pub async fn stop_run(
-    run_id: String,
-    state: tauri::State<'_, AppState>,
-) -> AppResult<()> {
+pub async fn stop_run(run_id: String, state: tauri::State<'_, AppState>) -> AppResult<()> {
     let sessions = state.run_manager.lock().await.sessions_arc();
 
     let handle = {
@@ -908,7 +893,10 @@ pub async fn send_input(
                 ));
             }
             Some(stdin) => {
-                stdin.write_all(text.as_bytes()).await.map_err(AppError::Io)?;
+                stdin
+                    .write_all(text.as_bytes())
+                    .await
+                    .map_err(AppError::Io)?;
                 stdin.write_all(b"\n").await.map_err(AppError::Io)?;
                 tracing::debug!(run_id = %run_id, text_len = text.len(), "send_input: wrote to stdin");
             }
@@ -917,21 +905,18 @@ pub async fn send_input(
 
     // Move text into the UserInput channel for transcript recording.
     handle.input_tx.try_send(text).map_err(|e| match e {
-        TrySendError::Full(_) => AppError::InvalidInput(
-            "run input queue full — try again shortly".to_string(),
-        ),
-        TrySendError::Closed(_) => AppError::InvalidInput(
-            "run is not accepting input".to_string(),
-        ),
+        TrySendError::Full(_) => {
+            AppError::InvalidInput("run input queue full — try again shortly".to_string())
+        }
+        TrySendError::Closed(_) => AppError::InvalidInput("run is not accepting input".to_string()),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::runs::manager::SessionHandle;
-    use tokio_util::sync::CancellationToken;
+    use std::collections::HashMap;
 
     // -----------------------------------------------------------------------
     // is_valid_sequence_name
@@ -947,58 +932,133 @@ mod tests {
     #[test]
     fn launch_run_rejects_sequence_name_with_leading_dash() {
         assert!(!is_valid_sequence_name("-"), "bare dash must be rejected");
-        assert!(!is_valid_sequence_name("--print"), "\"--print\" must be rejected");
-        assert!(!is_valid_sequence_name("--help"), "\"--help\" must be rejected");
-        assert!(!is_valid_sequence_name("-x"), "single-letter flag must be rejected");
+        assert!(
+            !is_valid_sequence_name("--print"),
+            "\"--print\" must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("--help"),
+            "\"--help\" must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("-x"),
+            "single-letter flag must be rejected"
+        );
     }
 
     /// Names that contain characters outside the allowlist must be rejected.
     #[test]
     fn is_valid_sequence_name_rejects_unsafe_characters() {
-        assert!(!is_valid_sequence_name("foo;bar"), "semicolon must be rejected");
-        assert!(!is_valid_sequence_name("foo&bar"), "ampersand must be rejected");
+        assert!(
+            !is_valid_sequence_name("foo;bar"),
+            "semicolon must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("foo&bar"),
+            "ampersand must be rejected"
+        );
         assert!(!is_valid_sequence_name("foo|bar"), "pipe must be rejected");
-        assert!(!is_valid_sequence_name("foo$bar"), "dollar sign must be rejected");
-        assert!(!is_valid_sequence_name("foo\nbar"), "newline must be rejected");
-        assert!(!is_valid_sequence_name("foo\x00bar"), "null byte must be rejected");
+        assert!(
+            !is_valid_sequence_name("foo$bar"),
+            "dollar sign must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("foo\nbar"),
+            "newline must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("foo\x00bar"),
+            "null byte must be rejected"
+        );
     }
 
     /// Valid names must be accepted.
     #[test]
     fn is_valid_sequence_name_accepts_valid_names() {
-        assert!(is_valid_sequence_name("my-sequence"), "hyphenated name must be accepted");
-        assert!(is_valid_sequence_name("sub/dir"), "forward-slash for subdir must be accepted");
-        assert!(is_valid_sequence_name("seq 1"), "space in name must be accepted");
-        assert!(is_valid_sequence_name("alpha.beta_gamma"), "dot and underscore must be accepted");
-        assert!(is_valid_sequence_name("MySequence"), "mixed case must be accepted");
+        assert!(
+            is_valid_sequence_name("my-sequence"),
+            "hyphenated name must be accepted"
+        );
+        assert!(
+            is_valid_sequence_name("sub/dir"),
+            "forward-slash for subdir must be accepted"
+        );
+        assert!(
+            is_valid_sequence_name("seq 1"),
+            "space in name must be accepted"
+        );
+        assert!(
+            is_valid_sequence_name("alpha.beta_gamma"),
+            "dot and underscore must be accepted"
+        );
+        assert!(
+            is_valid_sequence_name("MySequence"),
+            "mixed case must be accepted"
+        );
         assert!(is_valid_sequence_name("a"), "single char must be accepted");
-        assert!(is_valid_sequence_name("foo.bar"), "dot in name must be accepted");
+        assert!(
+            is_valid_sequence_name("foo.bar"),
+            "dot in name must be accepted"
+        );
     }
 
     /// Names containing `..` path components must be rejected.
     #[test]
     fn is_valid_sequence_name_rejects_dotdot_segments() {
-        assert!(!is_valid_sequence_name("../../etc/passwd"), "double-dot traversal must be rejected");
-        assert!(!is_valid_sequence_name("../sibling"), "leading double-dot segment must be rejected");
-        assert!(!is_valid_sequence_name("sub/../etc"), "double-dot in middle must be rejected");
-        assert!(!is_valid_sequence_name(".."), "bare double-dot must be rejected");
+        assert!(
+            !is_valid_sequence_name("../../etc/passwd"),
+            "double-dot traversal must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("../sibling"),
+            "leading double-dot segment must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("sub/../etc"),
+            "double-dot in middle must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name(".."),
+            "bare double-dot must be rejected"
+        );
     }
 
     /// Single-dot segments and empty segments (trailing/consecutive slashes) must be rejected.
     #[test]
     fn is_valid_sequence_name_rejects_dot_and_empty_segments() {
-        assert!(!is_valid_sequence_name("."), "bare single-dot must be rejected");
-        assert!(!is_valid_sequence_name("./foo"), "leading dot-segment must be rejected");
-        assert!(!is_valid_sequence_name("foo/."), "trailing dot-segment must be rejected");
-        assert!(!is_valid_sequence_name("foo//bar"), "consecutive slashes must be rejected");
-        assert!(!is_valid_sequence_name("foo/"), "trailing slash must be rejected");
+        assert!(
+            !is_valid_sequence_name("."),
+            "bare single-dot must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("./foo"),
+            "leading dot-segment must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("foo/."),
+            "trailing dot-segment must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("foo//bar"),
+            "consecutive slashes must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("foo/"),
+            "trailing slash must be rejected"
+        );
     }
 
     /// Names starting with `/` must be rejected as absolute paths.
     #[test]
     fn is_valid_sequence_name_rejects_absolute_path() {
-        assert!(!is_valid_sequence_name("/absolute"), "leading slash must be rejected");
-        assert!(!is_valid_sequence_name("/etc/passwd"), "absolute path must be rejected");
+        assert!(
+            !is_valid_sequence_name("/absolute"),
+            "leading slash must be rejected"
+        );
+        assert!(
+            !is_valid_sequence_name("/etc/passwd"),
+            "absolute path must be rejected"
+        );
         assert!(!is_valid_sequence_name("/"), "bare slash must be rejected");
     }
 
@@ -1074,16 +1134,21 @@ mod tests {
     #[tokio::test]
     async fn validate_cli_path_rejects_bare_filename() {
         let result = validate_cli_path(std::path::Path::new("claude")).await;
-        assert!(result.is_err(), "bare filename must be rejected as relative");
+        assert!(
+            result.is_err(),
+            "bare filename must be rejected as relative"
+        );
     }
 
     /// On Windows, a UNC path starting with `\\` must be rejected.
     #[cfg(target_os = "windows")]
     #[tokio::test]
     async fn validate_cli_path_rejects_unc_backslash() {
-        let result =
-            validate_cli_path(std::path::Path::new("\\\\server\\share\\claude")).await;
-        assert!(result.is_err(), "UNC path with backslashes must be rejected");
+        let result = validate_cli_path(std::path::Path::new("\\\\server\\share\\claude")).await;
+        assert!(
+            result.is_err(),
+            "UNC path with backslashes must be rejected"
+        );
         let msg = result.unwrap_err();
         assert!(
             msg.contains("UNC") || msg.contains("network"),
@@ -1095,9 +1160,11 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[tokio::test]
     async fn validate_cli_path_rejects_unc_forward_slash() {
-        let result =
-            validate_cli_path(std::path::Path::new("//server/share/claude")).await;
-        assert!(result.is_err(), "UNC path with forward slashes must be rejected");
+        let result = validate_cli_path(std::path::Path::new("//server/share/claude")).await;
+        assert!(
+            result.is_err(),
+            "UNC path with forward slashes must be rejected"
+        );
         let msg = result.unwrap_err();
         assert!(
             msg.contains("UNC") || msg.contains("network"),
@@ -1141,7 +1208,11 @@ mod tests {
             .await
             .expect("write temp file");
         let result = validate_cli_path(&file_path).await;
-        assert!(result.is_ok(), "existing regular file must be accepted: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "existing regular file must be accepted: {:?}",
+            result
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1232,10 +1303,16 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let path = tmp.path().join("context.md");
         let content = b"# Context\n\nThis is the attached context.\n";
-        tokio::fs::write(&path, content).await.expect("write test file");
+        tokio::fs::write(&path, content)
+            .await
+            .expect("write test file");
 
         let result = read_attached_md(&path).await;
-        assert!(result.is_ok(), "existing file must be readable: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "existing file must be readable: {:?}",
+            result
+        );
         assert_eq!(result.unwrap(), content, "content must match exactly");
     }
 
@@ -1280,7 +1357,9 @@ mod tests {
 
         const LIMIT: usize = 1_048_576;
         let exact = vec![b'a'; LIMIT];
-        tokio::fs::write(&path, &exact).await.expect("write limit file");
+        tokio::fs::write(&path, &exact)
+            .await
+            .expect("write limit file");
 
         let result = read_attached_md(&path).await;
         assert!(
@@ -1296,7 +1375,9 @@ mod tests {
     async fn read_attached_md_accepts_empty_file() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let path = tmp.path().join("empty.md");
-        tokio::fs::write(&path, b"").await.expect("write empty file");
+        tokio::fs::write(&path, b"")
+            .await
+            .expect("write empty file");
 
         let result = read_attached_md(&path).await;
         assert!(result.is_ok(), "empty file must be accepted: {:?}", result);
@@ -1332,8 +1413,9 @@ mod tests {
     #[tokio::test]
     async fn stop_run_returns_error_for_unknown_run_id() {
         // Build an empty sessions map (no active runs).
-        let sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>> =
-            std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let sessions: std::sync::Arc<
+            tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>,
+        > = std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
         // Simulate the stop_run lookup.
         let handle = {
@@ -1360,8 +1442,9 @@ mod tests {
     #[tokio::test]
     async fn send_input_returns_error_for_unknown_run_id() {
         // Build an empty sessions map (no active runs).
-        let sessions: std::sync::Arc<tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>> =
-            std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let sessions: std::sync::Arc<
+            tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>,
+        > = std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
         // Simulate the send_input lookup.
         let handle = {
@@ -1380,5 +1463,4 @@ mod tests {
             result
         );
     }
-
 }

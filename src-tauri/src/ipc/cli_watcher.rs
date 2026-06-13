@@ -1,8 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(serde::Serialize, Clone)]
 struct CliLostPayload {
@@ -30,16 +30,18 @@ pub fn start(
     // on_window_event fires for every window; we update the shared flag on any
     // Focused event regardless of which window caused it, which is correct for
     // a single-window app (this dashboard).
-    app_handle.on_window_event(move |_window, event| {
-        if let tauri::WindowEvent::Focused(focused) = event {
-            is_focused_for_event.store(*focused, Ordering::Relaxed);
-            tracing::debug!(
-                component = "window_focus",
-                state = if *focused { "focused" } else { "blurred" },
-                "window state change"
-            );
-        }
-    });
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                is_focused_for_event.store(*focused, Ordering::Relaxed);
+                tracing::debug!(
+                    component = "window_focus",
+                    state = if *focused { "focused" } else { "blurred" },
+                    "window state change"
+                );
+            }
+        });
+    }
 
     tokio::spawn(async move {
         // Assume CLI was found at launch — the startup check (T1.3) would have
@@ -102,7 +104,10 @@ pub fn start(
 
                 // Emit Tauri event to the frontend. Errors are non-fatal — if
                 // there is no listener the event is silently dropped.
-                let _ = app_handle.emit(crate::ipc::events::CLI_LOST, CliLostPayload { error: path_str });
+                let _ = app_handle.emit(
+                    crate::ipc::events::CLI_LOST,
+                    CliLostPayload { error: path_str },
+                );
                 last_found = false;
             }
             // else: !found && !last_found — already emitted once; do not repeat.
@@ -150,7 +155,7 @@ async fn probe_cli(path: &std::path::Path) -> bool {
             tracing::debug!(component = "cli_detect", path = %path.display(), error = %e, "probe spawn failed");
             false
         }
-        Ok(child) => {
+        Ok(mut child) => {
             match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
                 Ok(Ok(_)) => true,
                 Ok(Err(e)) => {
@@ -188,7 +193,10 @@ mod tests {
     #[tokio::test]
     async fn probe_cli_returns_false_for_non_absolute_path() {
         let found = probe_cli(std::path::Path::new("claude")).await;
-        assert!(!found, "bare/relative path must return false without PATH lookup");
+        assert!(
+            !found,
+            "bare/relative path must return false without PATH lookup"
+        );
     }
 
     /// An absolute path that does not exist must also return false.
@@ -243,7 +251,10 @@ mod tests {
         // unknown-flag output, but it will at least spawn successfully.
         // probe_cli only checks spawnability, not the exit code.
         let found = probe_cli(&exe).await;
-        assert!(found, "current test executable must be considered a valid CLI");
+        assert!(
+            found,
+            "current test executable must be considered a valid CLI"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -283,7 +294,10 @@ mod tests {
                 elapsed = 0;
             }
         }
-        assert_eq!(elapsed, 0, "counter must remain 0 when all ticks are unfocused");
+        assert_eq!(
+            elapsed, 0,
+            "counter must remain 0 when all ticks are unfocused"
+        );
     }
 
     /// Exactly 12 focused ticks × 5 s = 60 s must satisfy the `< 60` loop
@@ -335,7 +349,10 @@ mod tests {
         }
         // else: already not-found — no change.
 
-        assert!(!last_found, "last_found must be false after found→not-found transition");
+        assert!(
+            !last_found,
+            "last_found must be false after found→not-found transition"
+        );
         // last_known_path must NOT be updated on a not-found result.
         assert_eq!(
             last_known_path,
@@ -363,7 +380,10 @@ mod tests {
         }
         // else: already not-found — no change.
 
-        assert!(!last_found, "last_found must remain false (no duplicate transition)");
+        assert!(
+            !last_found,
+            "last_found must remain false (no duplicate transition)"
+        );
         assert!(
             last_known_path.is_none(),
             "last_known_path must remain None when probe stays not-found"
@@ -389,7 +409,10 @@ mod tests {
             last_found = false;
         }
 
-        assert!(last_found, "last_found must be true after not-found→found restoration");
+        assert!(
+            last_found,
+            "last_found must be true after not-found→found restoration"
+        );
         assert_eq!(
             last_known_path,
             Some(PathBuf::from("/usr/bin/claude")),
@@ -415,7 +438,10 @@ mod tests {
             last_found = false;
         }
 
-        assert!(last_found, "last_found must remain true in steady-found state");
+        assert!(
+            last_found,
+            "last_found must remain true in steady-found state"
+        );
         assert_eq!(
             last_known_path,
             Some(PathBuf::from("/new/resolved/claude")),
