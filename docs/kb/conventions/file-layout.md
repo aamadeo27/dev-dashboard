@@ -2,11 +2,15 @@
 
 ```
 dev-dashboard/
-├── .claude/                       # this project's own dashboard data (dogfood)
-│   ├── requirements.md
-│   ├── ui-ux-spec.md
-│   ├── knowledge-base.md          # monolith (superseded by docs/kb/)
-│   └── epics.md
+├── docs/                          # canonical spec + knowledge base
+│   ├── requirements.md            # was .claude/requirements.md (relocated, adoption 2026-06-13)
+│   ├── ui-ux.md                   # was .claude/ui-ux-spec.md
+│   ├── devops.md                  # was .claude/devops.md
+│   ├── monitoring.md              # was .claude/monitoring.md
+│   ├── kb/                        # itemized knowledge base (index-only README)
+│   ├── epics/                     # epic-0..9 + README backlog
+│   └── _archive/                  # superseded originals + pre-split .bak files
+├── .claude/                       # agent/sequence/hook config (spec docs relocated to docs/)
 ├── src-tauri/                     # Rust side
 │   ├── Cargo.toml
 │   ├── tauri.conf.json

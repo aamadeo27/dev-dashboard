@@ -66,3 +66,78 @@ Foundation. Blocks everything.
   - `tracing::info!("hello")` from main shows up structured in the log.
   - Calling `invoke('log_frontend_error', { message, stack })` writes a line at `error` level with `source=frontend`.
 - **Dependencies**: T0.2.
+
+---
+
+## Infra Gap Tasks (added 2026-06-13, adoption audit)
+
+The following tasks were identified during DevOps adoption audit. They address gaps between the DevOps plan
+(`docs/devops.md`) and the actual on-disk state. None of these block feature work; they are housekeeping.
+
+---
+
+### T0.CI-1 [shared] Add CI workflow to enforce task-footer validation on PRs
+
+- **Description**: `.claude/hooks/validate-task-footer.sh` exists and validates that squash-merge commits
+  targeting `main` carry `Task: T<n>.<m>` and `Notes:` footers. The hook can run in CI mode (reads from
+  `HEAD` when no `$1` arg is given). However, no GitHub Actions workflow invokes it on PRs. Create
+  `.github/workflows/validate-task-footer.yml` that runs the script on pull requests targeting `main`,
+  checking the PR's head commit message for the required footers. The job should only fail when
+  `GITHUB_BASE_REF=main` (the script already checks `target_branch`).
+- **Acceptance**:
+  - A PR to `main` whose latest commit lacks `Task: T<n>.<m>` causes the new CI job to fail.
+  - A PR to `main` with both footers passes.
+  - The workflow does not run on pushes to non-`main` branches or on tag pushes.
+  - The new job name is added to branch-protection required checks in the GitHub repo settings.
+- **Dependencies**: none (`.claude/hooks/validate-task-footer.sh` already exists).
+
+---
+
+### T0.CI-2 [shared] Wire update-status.sh as a git post-merge hook via pnpm prepare ✓ DONE
+
+> Resolved by orchestrator during adoption (2026-06-13) via option (b): `.githooks/post-merge` shim delegates to `.claude/hooks/update-status.sh` (with `INTEGRATION_BRANCH=master`), and `core.hooksPath` is set to `.githooks`. `pnpm prepare` keeps it active after clone. Note: this repo's integration branch is `master`, not `main` as the original description assumed.
+
+- **Description**: `.claude/hooks/update-status.sh` is a `post-merge` hook that triggers the
+  `status-updater` agent after a squash-merge to `main`. Currently `pnpm prepare` only sets
+  `core.hooksPath .githooks`, and `update-status.sh` lives in `.claude/hooks/` — it is never invoked
+  by git. Two options: (a) copy/symlink `update-status.sh` into `.githooks/post-merge`, or (b) add a
+  `.githooks/post-merge` shim that delegates to `.claude/hooks/update-status.sh`. Either way,
+  `pnpm prepare` must result in the hook being active after clone.
+- **Acceptance**:
+  - After `pnpm prepare`, merging a commit with a `Task:` footer to `main` triggers the status-updater
+    agent (or logs a skip if `PROJECT_STATUS.md` does not exist yet).
+  - The hook exits 0 regardless of agent outcome (best-effort, must not block merge).
+  - `pnpm prepare` is idempotent: running it twice does not break anything.
+- **Dependencies**: none (`update-status.sh` already exists and is correct).
+
+---
+
+### T0.CI-3 [shared] Wire log-usage.sh in .claude/settings.json
+
+- **Description**: `.claude/hooks/log-usage.sh` logs Claude token usage to `DevTeam.log` on every
+  Claude Code session stop. It requires a `Stop` and `SubagentStop` hook entry in `.claude/settings.json`.
+  Currently only `.claude/settings.local.json` exists (permissions allowlist only); there is no
+  `.claude/settings.json`. Create `.claude/settings.json` with the two hook entries pointing to
+  `.claude/hooks/log-usage.sh`. The file should be committed so the hook is active for all contributors.
+- **Acceptance**:
+  - `.claude/settings.json` contains `hooks.Stop` and `hooks.SubagentStop` entries referencing `log-usage.sh`.
+  - After a Claude Code session, a usage line appears in `DevTeam.log`:
+    `[<ts>] [usage-hook] [Usage tokens] in=N out=N cache_read=N cache_create=N model=<m> source=stop`.
+  - `jq` is listed as a dev prerequisite in README or CLAUDE.md (the script requires it).
+- **Dependencies**: none (`log-usage.sh` already exists and is correct).
+
+---
+
+### T0.CI-4 [docs] Update KB branching-and-pr-pattern.md to reference docs/devops.md ✓ DONE
+
+> Resolved by orchestrator during adoption (2026-06-13): `branching-and-pr-pattern.md` and `secrets.md` now reference `docs/devops.md`. `grep -r '\.claude/devops\.md' docs/` returns no matches.
+
+- **Description**: `docs/kb/conventions/branching-and-pr-pattern.md` currently reads "Full details in
+  `.claude/devops.md` §3 and §4." The DevOps plan has been relocated to `docs/devops.md` as part of
+  the adoption process. Update the reference in that file (and any other KB/epic files that point to
+  `.claude/devops.md`) to reference `docs/devops.md` instead.
+- **Acceptance**:
+  - `grep -r '\.claude/devops\.md' docs/` returns no matches.
+  - `docs/kb/conventions/branching-and-pr-pattern.md` links to `docs/devops.md §3` and `§4`.
+  - No other docs reference the old `.claude/devops.md` path.
+- **Dependencies**: none (docs/devops.md already exists).

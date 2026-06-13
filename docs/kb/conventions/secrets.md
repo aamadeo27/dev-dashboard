@@ -1,6 +1,6 @@
 # Secrets
 
-Full details in `.claude/devops.md` §1.
+Full details in `docs/devops.md` §1.
 
 **This repo has no secrets.** The application manages zero credentials. The `claude` CLI handles its own authentication externally and independently of this codebase.
 

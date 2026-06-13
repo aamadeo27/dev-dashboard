@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Wired by project-adoption (sequence 14, 2026-06-13) — resolves T0.CI-2.
+# Delegates to the tracked status-updater trigger in .claude/hooks/.
+# INTEGRATION_BRANCH defaults to master (this repo's integration branch).
+root="$(git rev-parse --show-toplevel)"
+INTEGRATION_BRANCH="${INTEGRATION_BRANCH:-master}" exec "$root/.claude/hooks/update-status.sh" "$@"

@@ -62,7 +62,7 @@ Frontend track can develop against typed mocks for any backend command before it
 
 ## Coverage Check
 
-Every requirement from `requirements.md` and every screen from `ui-ux-spec.md` is covered:
+Every requirement from `../requirements.md` and every screen from `../ui-ux.md` is covered:
 
 | Req / Screen | Task(s) |
 |---|---|
@@ -95,6 +95,7 @@ Every requirement from `requirements.md` and every screen from `ui-ux-spec.md` i
 | S-04 Run Live | T5.3, T5.4, T5.9 |
 | S-05 Run Historical | T5.6 |
 | S-06 Launch Modal | T5.8 |
+| Quick-run dispatch (⚡ button) | T2.5, T5.7, T5.8, T5.10 |
 | S-07 Settings | T1.4 |
 | S-08 Tag Editor | T2.7 |
 | S-09 Toasts | T6.1, T6.2, T6.3 |

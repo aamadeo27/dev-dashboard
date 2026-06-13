@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Wired by project-adoption (sequence 14, 2026-06-13).
+# Validates "Task:" + "Notes:" footers on commits whose target is the integration branch.
+# Skips merge/fixup/squash/WIP and feature-branch commits (see the script).
+root="$(git rev-parse --show-toplevel)"
+INTEGRATION_BRANCH="${INTEGRATION_BRANCH:-master}" exec "$root/.claude/hooks/validate-task-footer.sh" "$@"

@@ -1,6 +1,6 @@
 # Branching and PR Pattern
 
-Full details in `.claude/devops.md` §3 and §4. Summary for coders:
+Full details in `docs/devops.md` §3 and §4. Summary for coders:
 
 **Branch naming**: `feat/<task-id>-short-desc`, `fix/<task-id>-short-desc`, `chore/<desc>`, `docs/<desc>`, `refactor/<desc>`. Example: `feat/T0.1-scaffold`.
 

@@ -86,3 +86,16 @@ Unblocks S-02 (Dashboard).
   - Works on all three OSes (manual smoke).
   - Failure emits an error toast via `toast:show` and returns `AppError::Io`.
 - **Dependencies**: T0.2.
+
+---
+
+### T2.9 [shared] Enforce per-tag 32-char limit (UI + backend)
+
+> [adoption-assumption] Added during project adoption (sequence 14, 2026-06-13). Resolves OQ-5 / FR-1.6.4. No enforcement existed in code at adoption time.
+
+- **Description**: Enforce a 32-character maximum per tag in both layers. UI: set `maxLength={32}` on the tag input in `src/components/TagEditorPopover.tsx`. Backend: in `set_project_tags` (`src-tauri/src/projects/`), reject any tag exceeding 32 chars before persisting, returning `AppError::InvalidInput`. Keep existing trim/lowercase/dedup normalization (FR-1.6.2/1.6.3).
+- **Acceptance**:
+  - UI input cannot accept more than 32 chars.
+  - `set_project_tags` rejects an over-length tag via IPC (unit test) — UI is not the only gate.
+  - Normalization order documented: trim → lowercase → length-check → dedup.
+- **Dependencies**: T2.1, T2.7.

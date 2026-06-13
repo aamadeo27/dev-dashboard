@@ -1,6 +1,6 @@
 # Epic 9 — Observability
 
-Local structured logging and in-app health signals. No remote telemetry (NFR-8). Concrete schema lives in `.claude/monitoring.md` — Coder must follow that doc field-for-field.
+Local structured logging and in-app health signals. No remote telemetry (NFR-8). Concrete schema lives in `docs/monitoring.md` — Coder must follow that doc field-for-field.
 
 ---
 
