@@ -1,6 +1,15 @@
 // Typed wrappers for Tauri commands. See KB §5. Additional wrappers added per task.
 import { invoke } from "@tauri-apps/api/core";
-import type { CliCheck, GitStatus, LaunchInput, Project, Run, Sequence, Settings, SettingsPatch } from "./bindings";
+import type {
+  CliCheck,
+  GitStatus,
+  LaunchInput,
+  Project,
+  Run,
+  Sequence,
+  Settings,
+  SettingsPatch,
+} from "./bindings";
 
 export function logFrontendError(message: string, stack?: string, route?: string): void {
   invoke("log_frontend_error", { message, stack, route }).catch(() => {});

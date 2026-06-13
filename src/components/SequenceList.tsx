@@ -22,7 +22,9 @@ export function SequenceList({ projectId }: SequenceListProps) {
   const { data: sequences, isLoading, error } = useSequences(projectId);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
 
-  // FIX-5: reset selection when projectId changes
+  // FIX-5: reset selection when projectId changes. The effect body doesn't read
+  // projectId, but the dependency is the intended trigger (reset on change).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: projectId is the intentional reset trigger
   React.useEffect(() => {
     setSelectedId(null);
   }, [projectId]);
@@ -58,13 +60,15 @@ export function SequenceList({ projectId }: SequenceListProps) {
     return (
       <div style={styles.stateContainer}>
         {/* FIX-1: include directory hint per UI spec §5.3 */}
-        <span style={styles.stateText}>No sequences found. Add .md files to .claude/sequences/ in your project.</span>
+        <span style={styles.stateText}>
+          No sequences found. Add .md files to .claude/sequences/ in your project.
+        </span>
       </div>
     );
   }
 
   return (
-    <ul role="list" style={styles.list}>
+    <ul style={styles.list}>
       {sequences.map((seq) => (
         <SequenceRow
           key={seq.name}

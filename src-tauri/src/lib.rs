@@ -11,6 +11,8 @@ pub mod usage;
 
 use std::sync::Arc;
 
+use tauri::Manager;
+
 use app_state::AppState;
 use settings::SettingsStore;
 
@@ -132,55 +134,59 @@ pub fn run() {
         })
         .invoke_handler({
             #[cfg(debug_assertions)]
-            { tauri::generate_handler![
-                ipc::commands::ping,
-                ipc::commands::ping_error,
-                ipc::commands::log_frontend_error,
-                ipc::commands::get_settings,
-                ipc::commands::update_settings,
-                ipc::commands::open_logs_folder,
-                ipc::commands::verify_claude_cli,
-                ipc::commands::list_projects,
-                ipc::commands::add_project,
-                ipc::commands::remove_project,
-                ipc::commands::relocate_project,
-                ipc::commands::set_project_tags,
-                ipc::commands::rename_project,
-                ipc::commands::scan_project,
-                ipc::commands::open_in_editor,
-                ipc::commands::open_in_terminal,
-                ipc::commands::get_git_status,
-                ipc::commands::set_visible_projects,
-                ipc::commands::list_sequences,
-                ipc::commands::refresh_sequences,
-                ipc::commands::launch_run,
-                ipc::commands::stop_run,
-                ipc::commands::send_input,
-            ] }
+            {
+                tauri::generate_handler![
+                    ipc::commands::ping,
+                    ipc::commands::ping_error,
+                    ipc::commands::log_frontend_error,
+                    ipc::commands::get_settings,
+                    ipc::commands::update_settings,
+                    ipc::commands::open_logs_folder,
+                    ipc::commands::verify_claude_cli,
+                    ipc::commands::list_projects,
+                    ipc::commands::add_project,
+                    ipc::commands::remove_project,
+                    ipc::commands::relocate_project,
+                    ipc::commands::set_project_tags,
+                    ipc::commands::rename_project,
+                    ipc::commands::scan_project,
+                    ipc::commands::open_in_editor,
+                    ipc::commands::open_in_terminal,
+                    ipc::commands::get_git_status,
+                    ipc::commands::set_visible_projects,
+                    ipc::commands::list_sequences,
+                    ipc::commands::refresh_sequences,
+                    ipc::commands::launch_run,
+                    ipc::commands::stop_run,
+                    ipc::commands::send_input,
+                ]
+            }
             #[cfg(not(debug_assertions))]
-            { tauri::generate_handler![
-                ipc::commands::ping,
-                ipc::commands::log_frontend_error,
-                ipc::commands::get_settings,
-                ipc::commands::update_settings,
-                ipc::commands::open_logs_folder,
-                ipc::commands::verify_claude_cli,
-                ipc::commands::list_projects,
-                ipc::commands::add_project,
-                ipc::commands::remove_project,
-                ipc::commands::relocate_project,
-                ipc::commands::set_project_tags,
-                ipc::commands::scan_project,
-                ipc::commands::open_in_editor,
-                ipc::commands::open_in_terminal,
-                ipc::commands::get_git_status,
-                ipc::commands::set_visible_projects,
-                ipc::commands::list_sequences,
-                ipc::commands::refresh_sequences,
-                ipc::commands::launch_run,
-                ipc::commands::stop_run,
-                ipc::commands::send_input,
-            ] }
+            {
+                tauri::generate_handler![
+                    ipc::commands::ping,
+                    ipc::commands::log_frontend_error,
+                    ipc::commands::get_settings,
+                    ipc::commands::update_settings,
+                    ipc::commands::open_logs_folder,
+                    ipc::commands::verify_claude_cli,
+                    ipc::commands::list_projects,
+                    ipc::commands::add_project,
+                    ipc::commands::remove_project,
+                    ipc::commands::relocate_project,
+                    ipc::commands::set_project_tags,
+                    ipc::commands::scan_project,
+                    ipc::commands::open_in_editor,
+                    ipc::commands::open_in_terminal,
+                    ipc::commands::get_git_status,
+                    ipc::commands::set_visible_projects,
+                    ipc::commands::list_sequences,
+                    ipc::commands::refresh_sequences,
+                    ipc::commands::launch_run,
+                    ipc::commands::stop_run,
+                    ipc::commands::send_input,
+                ]
+            }
         })
         .run(tauri::generate_context!())
         .expect("Tauri application failed to start — check logs for initialization errors");

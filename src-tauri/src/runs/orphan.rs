@@ -234,10 +234,17 @@ fn maybe_kill_pid(pid: u32, claude_cli_path: Option<&Path>, system: &System, run
         }
     };
 
-    // Normalize both paths to string for comparison (handles different
-    // separator styles on Windows).
-    let expected_str = expected_exe.to_string_lossy().to_lowercase();
-    let process_str = process_exe.to_string_lossy().to_lowercase();
+    // Canonicalize both paths before comparing so symlinks resolve (e.g. on
+    // Linux `/bin` is a symlink to `/usr/bin`, so a configured `/bin/sleep`
+    // and the sysinfo-reported `/usr/bin/sleep` refer to the same exe). Fall
+    // back to the raw path if canonicalization fails (e.g. file removed).
+    // Lower-casing handles case-insensitive path styles on Windows.
+    let expected_canon =
+        std::fs::canonicalize(expected_exe).unwrap_or_else(|_| expected_exe.to_path_buf());
+    let process_canon =
+        std::fs::canonicalize(process_exe).unwrap_or_else(|_| process_exe.to_path_buf());
+    let expected_str = expected_canon.to_string_lossy().to_lowercase();
+    let process_str = process_canon.to_string_lossy().to_lowercase();
 
     if expected_str != process_str {
         tracing::info!(
@@ -402,7 +409,10 @@ mod tests {
     async fn pending_run_no_pid_is_marked_failed() {
         let tmp = TempDir::new().expect("tempdir");
         let project_path = tmp.path().to_path_buf();
-        let run_dir = project_path.join(".claude").join("runs").join("run-pending");
+        let run_dir = project_path
+            .join(".claude")
+            .join("runs")
+            .join("run-pending");
         write_meta(&run_dir, "run-pending", RunStatus::Pending, None);
 
         run(&[project_path], None).await;
@@ -429,7 +439,10 @@ mod tests {
     async fn running_run_no_pid_is_marked_failed() {
         let tmp = TempDir::new().expect("tempdir");
         let project_path = tmp.path().to_path_buf();
-        let run_dir = project_path.join(".claude").join("runs").join("run-running");
+        let run_dir = project_path
+            .join(".claude")
+            .join("runs")
+            .join("run-running");
         write_meta(&run_dir, "run-running", RunStatus::Running, None);
 
         run(&[project_path], None).await;
@@ -484,13 +497,28 @@ mod tests {
         run(&[project_path], None).await;
 
         // Pending → Failed.
-        assert!(matches!(read_meta_sync(&pending_dir).status, RunStatus::Failed));
+        assert!(matches!(
+            read_meta_sync(&pending_dir).status,
+            RunStatus::Failed
+        ));
         // Running → Failed.
-        assert!(matches!(read_meta_sync(&running_dir).status, RunStatus::Failed));
+        assert!(matches!(
+            read_meta_sync(&running_dir).status,
+            RunStatus::Failed
+        ));
         // Others unchanged.
-        assert!(matches!(read_meta_sync(&failed_dir).status, RunStatus::Failed));
-        assert!(matches!(read_meta_sync(&completed_dir).status, RunStatus::Completed));
-        assert!(matches!(read_meta_sync(&stopped_dir).status, RunStatus::Stopped));
+        assert!(matches!(
+            read_meta_sync(&failed_dir).status,
+            RunStatus::Failed
+        ));
+        assert!(matches!(
+            read_meta_sync(&completed_dir).status,
+            RunStatus::Completed
+        ));
+        assert!(matches!(
+            read_meta_sync(&stopped_dir).status,
+            RunStatus::Stopped
+        ));
     }
 
     // ── Test 7: corrupt meta.json is skipped without panicking ───────────────
@@ -499,9 +527,13 @@ mod tests {
     async fn corrupt_meta_json_is_skipped() {
         let tmp = TempDir::new().expect("tempdir");
         let project_path = tmp.path().to_path_buf();
-        let run_dir = project_path.join(".claude").join("runs").join("run-corrupt");
+        let run_dir = project_path
+            .join(".claude")
+            .join("runs")
+            .join("run-corrupt");
         std::fs::create_dir_all(&run_dir).expect("create run_dir");
-        std::fs::write(run_dir.join("meta.json"), b"{ not valid json !!! }").expect("write corrupt");
+        std::fs::write(run_dir.join("meta.json"), b"{ not valid json !!! }")
+            .expect("write corrupt");
 
         // Must not panic.
         run(&[project_path], None).await;
@@ -520,7 +552,10 @@ mod tests {
         // PID 9_999_999 is very unlikely to be a real process; the system was
         // not refreshed so it definitely won't appear.
         let result = maybe_kill_pid(9_999_999, Some(&fake_cli), &system, "test-run");
-        assert!(!result, "must return false when PID is not in the system snapshot");
+        assert!(
+            !result,
+            "must return false when PID is not in the system snapshot"
+        );
     }
 
     // ── Test 9: maybe_kill_pid — None cli_path → false ───────────────────────
@@ -556,8 +591,14 @@ mod tests {
 
         run(&[proj_a, proj_b], None).await;
 
-        assert!(matches!(read_meta_sync(&run_dir_a).status, RunStatus::Failed));
-        assert!(matches!(read_meta_sync(&run_dir_b).status, RunStatus::Failed));
+        assert!(matches!(
+            read_meta_sync(&run_dir_a).status,
+            RunStatus::Failed
+        ));
+        assert!(matches!(
+            read_meta_sync(&run_dir_b).status,
+            RunStatus::Failed
+        ));
         assert_eq!(
             read_meta_sync(&run_dir_a).note.as_deref(),
             Some(ORPHAN_NOTE)

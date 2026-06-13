@@ -89,7 +89,9 @@ describe("SequenceList — empty state", () => {
     const { wrapper } = makeWrapper();
     render(createElement(SequenceList, { projectId: "proj-1" }), { wrapper });
     await waitFor(() => {
-      expect(screen.getByText("No sequences found. Add .md files to .claude/sequences/ in your project.")).toBeTruthy();
+      expect(
+        screen.getByText("No sequences found. Add .md files to .claude/sequences/ in your project.")
+      ).toBeTruthy();
     });
   });
 });
@@ -180,9 +182,7 @@ describe("SequenceList — query key", () => {
       makeSequence({ name: "seq-for-proj-b-2", description: "For B second." }),
     ];
 
-    vi.mocked(listSequences)
-      .mockResolvedValueOnce(seqsA)
-      .mockResolvedValueOnce(seqsB);
+    vi.mocked(listSequences).mockResolvedValueOnce(seqsA).mockResolvedValueOnce(seqsB);
 
     const { wrapper, queryClient } = makeWrapper();
 
@@ -212,9 +212,7 @@ describe("SequenceList — query key", () => {
 
 describe("SequenceList — ul role", () => {
   it("9. populated list renders a <ul> with role='list'", async () => {
-    const sequences = [
-      makeSequence({ name: "seq-x", description: "X." }),
-    ];
+    const sequences = [makeSequence({ name: "seq-x", description: "X." })];
     vi.mocked(listSequences).mockResolvedValue(sequences);
     const { wrapper } = makeWrapper();
     render(createElement(SequenceList, { projectId: "proj-1" }), { wrapper });
@@ -244,23 +242,19 @@ describe("SequenceList — empty projectId disables query", () => {
 
     // With no data and query disabled, the component should render the empty state
     await waitFor(() => {
-      expect(screen.getByText("No sequences found. Add .md files to .claude/sequences/ in your project.")).toBeTruthy();
+      expect(
+        screen.getByText("No sequences found. Add .md files to .claude/sequences/ in your project.")
+      ).toBeTruthy();
     });
   });
 });
 
 describe("SequenceList — selectedId resets on projectId change", () => {
   it("11. selecting a row then changing projectId resets selectedId", async () => {
-    const seqsA = [
-      makeSequence({ name: "seq-a", description: "For A." }),
-    ];
-    const seqsB = [
-      makeSequence({ name: "seq-b", description: "For B." }),
-    ];
+    const seqsA = [makeSequence({ name: "seq-a", description: "For A." })];
+    const seqsB = [makeSequence({ name: "seq-b", description: "For B." })];
 
-    vi.mocked(listSequences)
-      .mockResolvedValueOnce(seqsA)
-      .mockResolvedValueOnce(seqsB);
+    vi.mocked(listSequences).mockResolvedValueOnce(seqsA).mockResolvedValueOnce(seqsB);
 
     const { wrapper, queryClient } = makeWrapper();
 

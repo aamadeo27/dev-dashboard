@@ -13,7 +13,6 @@
 ///   immediate return, atomic write integrity.
 /// - Tauri command wiring (`get_settings` / `update_settings`) — those require
 ///   a running Tauri app context and are covered by the frontend smoke tests.
-
 use dev_dashboard_lib::settings::{Settings, SettingsPatch, SettingsStore, ViewMode};
 
 // ---------------------------------------------------------------------------
@@ -83,7 +82,10 @@ async fn round_trip_all_fields_survive_save_and_reload() {
         retention_size_mb: Some(200),
         view_mode: Some(ViewMode::List),
     };
-    store.patch(patch, dir.path()).await.expect("patch must succeed");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("patch must succeed");
 
     // Reload from disk into a fresh store.
     let store2 = SettingsStore::load(dir.path());
@@ -99,14 +101,27 @@ async fn round_trip_all_fields_survive_save_and_reload() {
         Some(cli_file),
         "claude_cli_path must survive round-trip"
     );
-    assert_eq!(s.git_poll_interval_secs, 300, "git_poll_interval_secs must survive round-trip");
+    assert_eq!(
+        s.git_poll_interval_secs, 300,
+        "git_poll_interval_secs must survive round-trip"
+    );
     assert_eq!(
         s.usage_poll_interval_secs, 120,
         "usage_poll_interval_secs must survive round-trip"
     );
-    assert_eq!(s.retention_days, 7, "retention_days must survive round-trip");
-    assert_eq!(s.retention_size_mb, 200, "retention_size_mb must survive round-trip");
-    assert_eq!(s.view_mode, ViewMode::List, "view_mode must survive round-trip");
+    assert_eq!(
+        s.retention_days, 7,
+        "retention_days must survive round-trip"
+    );
+    assert_eq!(
+        s.retention_size_mb, 200,
+        "retention_size_mb must survive round-trip"
+    );
+    assert_eq!(
+        s.view_mode,
+        ViewMode::List,
+        "view_mode must survive round-trip"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +138,10 @@ async fn git_poll_min_boundary_passes() {
         git_poll_interval_secs: Some(5),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("git_poll=5 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("git_poll=5 must be accepted");
     assert_eq!(store.settings().git_poll_interval_secs, 5);
 }
 
@@ -157,7 +175,10 @@ async fn git_poll_max_boundary_passes() {
         git_poll_interval_secs: Some(3600),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("git_poll=3600 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("git_poll=3600 must be accepted");
     assert_eq!(store.settings().git_poll_interval_secs, 3600);
 }
 
@@ -190,7 +211,10 @@ async fn usage_poll_min_boundary_passes() {
         usage_poll_interval_secs: Some(30),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("usage_poll=30 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("usage_poll=30 must be accepted");
     assert_eq!(store.settings().usage_poll_interval_secs, 30);
 }
 
@@ -223,7 +247,10 @@ async fn usage_poll_max_boundary_passes() {
         usage_poll_interval_secs: Some(3600),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("usage_poll=3600 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("usage_poll=3600 must be accepted");
     assert_eq!(store.settings().usage_poll_interval_secs, 3600);
 }
 
@@ -256,7 +283,10 @@ async fn retention_days_min_boundary_passes() {
         retention_days: Some(1),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("retention_days=1 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("retention_days=1 must be accepted");
     assert_eq!(store.settings().retention_days, 1);
 }
 
@@ -291,7 +321,10 @@ async fn retention_size_mb_min_boundary_passes() {
         retention_size_mb: Some(50),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("retention_size_mb=50 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("retention_size_mb=50 must be accepted");
     assert_eq!(store.settings().retention_size_mb, 50);
 }
 
@@ -324,7 +357,10 @@ async fn retention_days_max_boundary_passes() {
         retention_days: Some(90),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("retention_days=90 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("retention_days=90 must be accepted");
     assert_eq!(store.settings().retention_days, 90);
 }
 
@@ -357,7 +393,10 @@ async fn retention_size_mb_max_boundary_passes() {
         retention_size_mb: Some(10_240),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("retention_size_mb=10240 must be accepted");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("retention_size_mb=10240 must be accepted");
     assert_eq!(store.settings().retention_size_mb, 10_240);
 }
 
@@ -396,7 +435,8 @@ fn corrupt_file_archived_and_fresh_load_returns_defaults() {
     // First load: should fall back to defaults and archive the file.
     let store1 = SettingsStore::load(dir.path());
     assert_eq!(
-        store1.settings().git_poll_interval_secs, 10,
+        store1.settings().git_poll_interval_secs,
+        10,
         "first load after corruption must return defaults"
     );
     assert!(broken_path.exists(), "broken file must be archived");
@@ -409,7 +449,8 @@ fn corrupt_file_archived_and_fresh_load_returns_defaults() {
     // (not fail or panic because the `.broken` file is sitting there).
     let store2 = SettingsStore::load(dir.path());
     assert_eq!(
-        store2.settings().git_poll_interval_secs, 10,
+        store2.settings().git_poll_interval_secs,
+        10,
         "second load (no file) must return defaults"
     );
     assert_eq!(store2.settings().view_mode, ViewMode::Grid);
@@ -440,13 +481,19 @@ async fn none_patch_fields_are_no_ops_for_path_fields() {
         claude_cli_path: Some(cli_file.clone()),
         ..SettingsPatch::default()
     };
-    store.patch(set_patch, dir.path()).await.expect("first patch must succeed");
+    store
+        .patch(set_patch, dir.path())
+        .await
+        .expect("first patch must succeed");
 
     assert_eq!(store.settings().parent_dir, Some(projects_dir.clone()));
     assert_eq!(store.settings().claude_cli_path, Some(cli_file.clone()));
 
     // Second patch: all None — must not clear the path fields.
-    store.patch(SettingsPatch::default(), dir.path()).await.expect("empty patch must succeed");
+    store
+        .patch(SettingsPatch::default(), dir.path())
+        .await
+        .expect("empty patch must succeed");
 
     assert_eq!(
         store.settings().parent_dir,
@@ -483,7 +530,10 @@ async fn path_fields_survive_round_trip() {
         claude_cli_path: Some(cli_file.clone()),
         ..SettingsPatch::default()
     };
-    store.patch(patch, dir.path()).await.expect("patch must succeed");
+    store
+        .patch(patch, dir.path())
+        .await
+        .expect("patch must succeed");
 
     let store2 = SettingsStore::load(dir.path());
     assert_eq!(
@@ -537,16 +587,30 @@ async fn sequential_patches_accumulate_state() {
 
     // Reload and verify combined state.
     let store2 = SettingsStore::load(dir.path());
-    assert_eq!(store2.settings().git_poll_interval_secs, 60, "patch 1 value must persist");
-    assert_eq!(store2.settings().view_mode, ViewMode::List, "patch 1 value must persist");
-    assert_eq!(store2.settings().retention_days, 14, "patch 2 value must persist");
+    assert_eq!(
+        store2.settings().git_poll_interval_secs,
+        60,
+        "patch 1 value must persist"
+    );
+    assert_eq!(
+        store2.settings().view_mode,
+        ViewMode::List,
+        "patch 1 value must persist"
+    );
+    assert_eq!(
+        store2.settings().retention_days,
+        14,
+        "patch 2 value must persist"
+    );
     // Fields not touched by either patch must keep their defaults.
     assert_eq!(
-        store2.settings().usage_poll_interval_secs, 60,
+        store2.settings().usage_poll_interval_secs,
+        60,
         "untouched field must retain default"
     );
     assert_eq!(
-        store2.settings().retention_size_mb, 500,
+        store2.settings().retention_size_mb,
+        500,
         "untouched field must retain default"
     );
 }
@@ -592,7 +656,8 @@ async fn failed_patch_does_not_mutate_store() {
 
     // The git_poll field must NOT have been updated.
     assert_eq!(
-        store.settings().git_poll_interval_secs, 120,
+        store.settings().git_poll_interval_secs,
+        120,
         "store must not be mutated when patch validation fails"
     );
 }
@@ -612,8 +677,14 @@ async fn save_creates_config_dir_if_missing() {
     assert!(!nested.exists(), "nested dir must not exist before save");
 
     let store = SettingsStore::load(&nested); // dir doesn't exist → returns defaults
-    store.save(&nested).await.expect("save into nested non-existent dir must succeed");
+    store
+        .save(&nested)
+        .await
+        .expect("save into nested non-existent dir must succeed");
 
     assert!(nested.exists(), "save must have created the config_dir");
-    assert!(nested.join("settings.json").exists(), "settings.json must exist after save");
+    assert!(
+        nested.join("settings.json").exists(),
+        "settings.json must exist after save"
+    );
 }

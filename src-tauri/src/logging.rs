@@ -17,8 +17,8 @@ pub fn init_logging(log_dir: &Path) -> tracing_appender::non_blocking::WorkerGua
     let file_appender = rolling::daily(log_dir, "app");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    let filter = EnvFilter::try_from_env("DEV_DASHBOARD_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter =
+        EnvFilter::try_from_env("DEV_DASHBOARD_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
 
     let file_layer = fmt::layer()
         .json()

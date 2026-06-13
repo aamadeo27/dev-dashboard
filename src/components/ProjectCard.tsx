@@ -166,11 +166,11 @@ export const ProjectCard = React.memo(function ProjectCard({
         : "Quick-run last sequence";
 
   return (
-    <div
+    // biome-ignore lint/a11y/useKeyWithClickEvents: card is a pointer-driven affordance; keyboard nav is handled by inner controls
+    <article
       style={cardStyle}
       onClick={onCardClick}
       onContextMenu={onContextMenu}
-      role="article"
       aria-label={project.name}
     >
       {/* Header row */}
@@ -272,7 +272,7 @@ export const ProjectCard = React.memo(function ProjectCard({
           </div>
         </>
       )}
-    </div>
+    </article>
   );
 });
 
@@ -296,14 +296,14 @@ function OutcomeBadge({ status }: { status: RunStatus }) {
 
 export function ProjectCardSkeleton() {
   return (
-    <div role="article" style={styles.skeletonCard} aria-busy="true" aria-label="Loading project">
+    <article style={styles.skeletonCard} aria-busy="true" aria-label="Loading project">
       <div style={styles.skeletonHeader}>
         <div style={styles.skeletonName} />
         <div style={styles.skeletonBtn} />
       </div>
       <div style={styles.skeletonGit} />
       <div style={styles.skeletonMeta} />
-    </div>
+    </article>
   );
 }
 

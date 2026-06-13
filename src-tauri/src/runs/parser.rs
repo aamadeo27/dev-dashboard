@@ -2,8 +2,8 @@
 
 pub mod patterns;
 
-use chrono::Utc;
 use super::RunEvent;
+use chrono::Utc;
 
 // ---------------------------------------------------------------------------
 // Module-level constants (security guards)
@@ -51,9 +51,7 @@ enum ParserState {
     ///
     /// Opened by a `⎿` prefix or `Result:` keyword line.  Ends on empty line
     /// or non-indented line.
-    AccumulatingToolResult {
-        lines: Vec<String>,
-    },
+    AccumulatingToolResult { lines: Vec<String> },
 }
 
 // ---------------------------------------------------------------------------
@@ -74,8 +72,9 @@ fn strip_control_chars(s: &str) -> String {
             // Keep printable, tab (0x09), newline (0x0A), carriage return (0x0D).
             // Strip C0 (0x00–0x08, 0x0B–0x0C, 0x0E–0x1F) and C1 (0x80–0x9F).
             let cp = c as u32;
-            !(cp <= 0x1F && cp != 0x09 && cp != 0x0A && cp != 0x0D)
-            && !(cp >= 0x80 && cp <= 0x9F)
+            let is_c0_control = cp <= 0x1F && cp != 0x09 && cp != 0x0A && cp != 0x0D;
+            let is_c1_control = (0x80..=0x9F).contains(&cp);
+            !is_c0_control && !is_c1_control
         })
         .collect()
 }
@@ -174,7 +173,10 @@ impl EventParser {
                 // FIX-1: Guard against unbounded line_buf growth.
                 if self.line_buf.len() >= MAX_LINE_BYTES {
                     events.push(RunEvent::System {
-                        text: format!("[parser] oversized line truncated at {} bytes", MAX_LINE_BYTES),
+                        text: format!(
+                            "[parser] oversized line truncated at {} bytes",
+                            MAX_LINE_BYTES
+                        ),
                         ts: Utc::now(),
                     });
                     self.line_buf.clear();
@@ -195,9 +197,7 @@ impl EventParser {
 
     fn process_line(&mut self, line: &str, events: &mut Vec<RunEvent>) {
         // Check StepFailed sentinel first (currently never fires since sentinel is "").
-        if !patterns::STEP_FAILED_SENTINEL.is_empty()
-            && line == patterns::STEP_FAILED_SENTINEL
-        {
+        if !patterns::STEP_FAILED_SENTINEL.is_empty() && line == patterns::STEP_FAILED_SENTINEL {
             events.push(RunEvent::StepFailed {
                 step: String::new(),
                 message: line.to_owned(),
@@ -225,9 +225,10 @@ impl EventParser {
             ParserState::AccumulatingToolCall { name, input_lines } => {
                 Self::process_tool_call_line(line, name, input_lines, events)
             }
-            ParserState::AccumulatingThinking { lines, needs_close_tag } => {
-                Self::process_thinking_line(line, lines, *needs_close_tag, events)
-            }
+            ParserState::AccumulatingThinking {
+                lines,
+                needs_close_tag,
+            } => Self::process_thinking_line(line, lines, *needs_close_tag, events),
             ParserState::AccumulatingToolResult { lines } => {
                 Self::process_tool_result_line(line, lines, events)
             }
@@ -245,8 +246,8 @@ impl EventParser {
 
     fn process_idle_line(&mut self, line: &str, events: &mut Vec<RunEvent>) -> Option<ParserState> {
         // ── Tool call opener ────────────────────────────────────────────────
-        if line.starts_with(patterns::TOOL_CALL_PREFIX) {
-            let name = line[patterns::TOOL_CALL_PREFIX.len()..].trim().to_owned();
+        if let Some(rest) = line.strip_prefix(patterns::TOOL_CALL_PREFIX) {
+            let name = rest.trim().to_owned();
             return Some(ParserState::AccumulatingToolCall {
                 name,
                 input_lines: Vec::new(),
@@ -258,11 +259,13 @@ impl EventParser {
             || line.starts_with(patterns::TOOL_RESULT_KEYWORD)
         {
             // The first line itself may carry content after the prefix.
-            let content = if line.starts_with(patterns::TOOL_RESULT_PREFIX) {
-                line[patterns::TOOL_RESULT_PREFIX.len()..].trim().to_owned()
+            let content = if let Some(rest) = line.strip_prefix(patterns::TOOL_RESULT_PREFIX) {
+                rest.trim().to_owned()
             } else {
                 // "Result: ..." — keep everything after the keyword
-                line[patterns::TOOL_RESULT_KEYWORD.len()..].trim_start().to_owned()
+                line[patterns::TOOL_RESULT_KEYWORD.len()..]
+                    .trim_start()
+                    .to_owned()
             };
             let mut lines = Vec::new();
             if !content.is_empty() {
@@ -274,11 +277,13 @@ impl EventParser {
         // ── Thinking opener (XML tag) ───────────────────────────────────────
         if line.contains(patterns::THINKING_OPEN) {
             // Content may appear on the same line after the open tag.
-            let after = line.splitn(2, patterns::THINKING_OPEN).nth(1).unwrap_or("");
+            let after = line
+                .split_once(patterns::THINKING_OPEN)
+                .map_or("", |(_, after)| after);
             // If the close tag is also on this line, emit immediately.
             if after.contains(patterns::THINKING_CLOSE) {
                 let text = after
-                    .splitn(2, patterns::THINKING_CLOSE)
+                    .split(patterns::THINKING_CLOSE)
                     .next()
                     .unwrap_or("")
                     .to_owned();
@@ -321,7 +326,7 @@ impl EventParser {
     /// Returns `Some(next_state)` when the block ends, else `None`.
     fn process_tool_call_line(
         line: &str,
-        name: &mut String,
+        name: &mut str,
         input_lines: &mut Vec<String>,
         events: &mut Vec<RunEvent>,
     ) -> Option<ParserState> {
@@ -331,13 +336,11 @@ impl EventParser {
         // Block-end conditions.
         if is_empty || !indented {
             // Emit accumulated ToolCall (or transition to diff/FileEdit).
-            let tool_name = name.clone();
+            let tool_name = name.to_owned();
             let raw_input: String = input_lines.join("\n");
 
             // Check if the tool is an edit/write tool AND has diff content.
-            let is_edit = patterns::EDIT_TOOL_NAMES
-                .iter()
-                .any(|&n| n == tool_name.as_str());
+            let is_edit = patterns::EDIT_TOOL_NAMES.contains(&tool_name.as_str());
 
             // Try to detect a diff block inside the accumulated lines.
             let has_diff_hunk = input_lines
@@ -350,9 +353,11 @@ impl EventParser {
                 let diff_body: Vec<String> = input_lines
                     .iter()
                     .map(|l| l.trim_start().to_owned())
-                    .filter(|l| l.starts_with(patterns::DIFF_HUNK_PREFIX)
-                        || l.starts_with('+')
-                        || l.starts_with('-'))
+                    .filter(|l| {
+                        l.starts_with(patterns::DIFF_HUNK_PREFIX)
+                            || l.starts_with('+')
+                            || l.starts_with('-')
+                    })
                     .collect();
 
                 let (additions, deletions) = count_diff_lines(&diff_body);
@@ -371,7 +376,10 @@ impl EventParser {
                 // FIX-3: size guard before JSON parse.
                 if raw_input.len() > MAX_BLOCK_BYTES {
                     events.push(RunEvent::System {
-                        text: format!("[parser] tool input too large ({} bytes), skipped", raw_input.len()),
+                        text: format!(
+                            "[parser] tool input too large ({} bytes), skipped",
+                            raw_input.len()
+                        ),
                         ts: Utc::now(),
                     });
                     if !is_empty {
@@ -381,27 +389,26 @@ impl EventParser {
                 }
 
                 // Parse input as JSON; fall back to System on error.
-                let input_value: serde_json::Value =
-                    match serde_json::from_str(&raw_input) {
-                        Ok(v) => v,
-                        Err(_) if raw_input.is_empty() => serde_json::Value::Null,
-                        Err(_) => {
-                            // Malformed block body → System event with raw content.
-                            events.push(RunEvent::System {
-                                text: strip_control_chars(&format!(
-                                    "malformed tool input for '{}': {}",
-                                    tool_name, raw_input
-                                )),
-                                ts: Utc::now(),
-                            });
-                            // Re-dispatch the non-empty triggering line in Idle so
-                            // it is not silently dropped.
-                            if !is_empty {
-                                return dispatch_idle_line(line, events).or(Some(ParserState::Idle));
-                            }
-                            return Some(ParserState::Idle);
+                let input_value: serde_json::Value = match serde_json::from_str(&raw_input) {
+                    Ok(v) => v,
+                    Err(_) if raw_input.is_empty() => serde_json::Value::Null,
+                    Err(_) => {
+                        // Malformed block body → System event with raw content.
+                        events.push(RunEvent::System {
+                            text: strip_control_chars(&format!(
+                                "malformed tool input for '{}': {}",
+                                tool_name, raw_input
+                            )),
+                            ts: Utc::now(),
+                        });
+                        // Re-dispatch the non-empty triggering line in Idle so
+                        // it is not silently dropped.
+                        if !is_empty {
+                            return dispatch_idle_line(line, events).or(Some(ParserState::Idle));
                         }
-                    };
+                        return Some(ParserState::Idle);
+                    }
+                };
 
                 events.push(RunEvent::ToolCall {
                     // FIX-6: use UUID v7 (time-ordered).
@@ -444,10 +451,7 @@ impl EventParser {
     ) -> Option<ParserState> {
         // Close by explicit tag.
         if line.contains(patterns::THINKING_CLOSE) {
-            let before = line
-                .splitn(2, patterns::THINKING_CLOSE)
-                .next()
-                .unwrap_or("");
+            let before = line.split(patterns::THINKING_CLOSE).next().unwrap_or("");
             if !before.is_empty() {
                 lines.push(before.to_owned());
             }
@@ -501,7 +505,10 @@ impl EventParser {
             // FIX-3: size guard before JSON parse.
             if raw_output.len() > MAX_BLOCK_BYTES {
                 events.push(RunEvent::System {
-                    text: format!("[parser] tool output too large ({} bytes), skipped", raw_output.len()),
+                    text: format!(
+                        "[parser] tool output too large ({} bytes), skipped",
+                        raw_output.len()
+                    ),
                     ts: Utc::now(),
                 });
                 if !is_empty {
@@ -643,7 +650,10 @@ mod tests {
     fn event_split_across_many_one_byte_chunks() {
         let mut p = parser();
         let msg = b"streaming text\n";
-        let events: Vec<RunEvent> = msg.iter().flat_map(|b| p.feed(std::slice::from_ref(b))).collect();
+        let events: Vec<RunEvent> = msg
+            .iter()
+            .flat_map(|b| p.feed(std::slice::from_ref(b)))
+            .collect();
         assert_eq!(events.len(), 1);
         match &events[0] {
             RunEvent::AssistantText { text, .. } => assert_eq!(text, "streaming text"),
@@ -659,7 +669,10 @@ mod tests {
         let events = p.feed(b"line one\nline two\n");
         assert_eq!(events.len(), 2);
         match (&events[0], &events[1]) {
-            (RunEvent::AssistantText { text: t1, .. }, RunEvent::AssistantText { text: t2, .. }) => {
+            (
+                RunEvent::AssistantText { text: t1, .. },
+                RunEvent::AssistantText { text: t2, .. },
+            ) => {
                 assert_eq!(t1, "line one");
                 assert_eq!(t2, "line two");
             }
@@ -713,7 +726,11 @@ mod tests {
 
         // We should have a System event for the malformed input.
         let has_system = events.iter().any(|e| matches!(e, RunEvent::System { .. }));
-        assert!(has_system, "expected a System event for malformed tool body; got {:?}", events);
+        assert!(
+            has_system,
+            "expected a System event for malformed tool body; got {:?}",
+            events
+        );
     }
 
     #[test]
@@ -727,7 +744,12 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::ToolCall { .. }))
             .collect();
-        assert_eq!(tool_calls.len(), 1, "expected one ToolCall event; got {:?}", events);
+        assert_eq!(
+            tool_calls.len(),
+            1,
+            "expected one ToolCall event; got {:?}",
+            events
+        );
         match &tool_calls[0] {
             RunEvent::ToolCall { name, input, .. } => {
                 assert_eq!(name, "Read");
@@ -750,7 +772,12 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::Thinking { .. }))
             .collect();
-        assert_eq!(thinking.len(), 1, "expected one Thinking event; got {:?}", events);
+        assert_eq!(
+            thinking.len(),
+            1,
+            "expected one Thinking event; got {:?}",
+            events
+        );
         match &thinking[0] {
             RunEvent::Thinking { text, .. } => assert!(text.contains("deep thought")),
             _ => unreachable!(),
@@ -769,7 +796,12 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::Thinking { .. }))
             .collect();
-        assert_eq!(thinking.len(), 1, "expected one Thinking event; got {:?}", events);
+        assert_eq!(
+            thinking.len(),
+            1,
+            "expected one Thinking event; got {:?}",
+            events
+        );
     }
 
     // ── CRLF handling ─────────────────────────────────────────────────────────
@@ -790,13 +822,22 @@ mod tests {
     #[test]
     fn step_failed_sentinel_empty_means_never_fires() {
         // The sentinel is currently "", so it never matches any real line.
-        assert_eq!(patterns::STEP_FAILED_SENTINEL, "", "sentinel must be empty per T4.8");
+        assert_eq!(
+            patterns::STEP_FAILED_SENTINEL,
+            "",
+            "sentinel must be empty per T4.8"
+        );
 
         let mut p = parser();
         // Feed a line that could be mistaken for the sentinel if it were non-empty.
         let events = p.feed(b"some line\n");
-        let has_step_failed = events.iter().any(|e| matches!(e, RunEvent::StepFailed { .. }));
-        assert!(!has_step_failed, "StepFailed must not fire while sentinel is empty");
+        let has_step_failed = events
+            .iter()
+            .any(|e| matches!(e, RunEvent::StepFailed { .. }));
+        assert!(
+            !has_step_failed,
+            "StepFailed must not fire while sentinel is empty"
+        );
     }
 
     #[test]
@@ -805,7 +846,9 @@ mod tests {
         // StepFailed — the guard `!STEP_FAILED_SENTINEL.is_empty()` prevents it.
         let mut p = parser();
         let events = p.feed(b"\n");
-        let has_step_failed = events.iter().any(|e| matches!(e, RunEvent::StepFailed { .. }));
+        let has_step_failed = events
+            .iter()
+            .any(|e| matches!(e, RunEvent::StepFailed { .. }));
         assert!(!has_step_failed, "empty sentinel must never match");
     }
 
@@ -848,9 +891,18 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::FileEdit { .. }))
             .collect();
-        assert_eq!(file_edits.len(), 1, "expected one FileEdit event; got {:?}", events);
+        assert_eq!(
+            file_edits.len(),
+            1,
+            "expected one FileEdit event; got {:?}",
+            events
+        );
         match &file_edits[0] {
-            RunEvent::FileEdit { additions, deletions, .. } => {
+            RunEvent::FileEdit {
+                additions,
+                deletions,
+                ..
+            } => {
                 // additions/deletions counted from the diff body
                 assert_eq!(*additions, 1, "expected 1 addition");
                 assert_eq!(*deletions, 1, "expected 1 deletion");
@@ -872,7 +924,12 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::ToolResult { .. }))
             .collect();
-        assert_eq!(results.len(), 1, "expected one ToolResult event; got {:?}", events);
+        assert_eq!(
+            results.len(),
+            1,
+            "expected one ToolResult event; got {:?}",
+            events
+        );
     }
 
     #[test]
@@ -885,7 +942,12 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::ToolResult { .. }))
             .collect();
-        assert_eq!(results.len(), 1, "expected one ToolResult event; got {:?}", events);
+        assert_eq!(
+            results.len(),
+            1,
+            "expected one ToolResult event; got {:?}",
+            events
+        );
     }
 
     // ── No partial events on incomplete lines ─────────────────────────────────
@@ -894,7 +956,11 @@ mod tests {
     fn no_events_emitted_for_incomplete_line() {
         let mut p = parser();
         let events = p.feed(b"no newline here");
-        assert!(events.is_empty(), "should not emit until newline; got {:?}", events);
+        assert!(
+            events.is_empty(),
+            "should not emit until newline; got {:?}",
+            events
+        );
     }
 
     #[test]
@@ -927,15 +993,35 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::Thinking { .. }))
             .collect();
-        assert_eq!(thinking.len(), 1, "expected exactly one Thinking event; got {:?}", events);
+        assert_eq!(
+            thinking.len(),
+            1,
+            "expected exactly one Thinking event; got {:?}",
+            events
+        );
         match &thinking[0] {
             RunEvent::Thinking { text, .. } => {
-                assert!(text.contains("line one"), "text missing 'line one': {:?}", text);
-                assert!(text.contains("line two"), "text missing 'line two': {:?}", text);
-                assert!(text.contains("line three"), "text missing 'line three': {:?}", text);
+                assert!(
+                    text.contains("line one"),
+                    "text missing 'line one': {:?}",
+                    text
+                );
+                assert!(
+                    text.contains("line two"),
+                    "text missing 'line two': {:?}",
+                    text
+                );
+                assert!(
+                    text.contains("line three"),
+                    "text missing 'line three': {:?}",
+                    text
+                );
                 // All three lines must be present in order, separated by newlines.
-                assert!(text.contains("line one\n  line two\n  line three"),
-                    "lines not joined correctly: {:?}", text);
+                assert!(
+                    text.contains("line one\n  line two\n  line three"),
+                    "lines not joined correctly: {:?}",
+                    text
+                );
             }
             _ => unreachable!(),
         }
@@ -960,10 +1046,19 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::Thinking { .. }))
             .collect();
-        assert_eq!(thinking.len(), 1, "expected one Thinking event; got {:?}", events);
+        assert_eq!(
+            thinking.len(),
+            1,
+            "expected one Thinking event; got {:?}",
+            events
+        );
         match &thinking[0] {
             RunEvent::Thinking { text, .. } => {
-                assert!(text.contains("indented thought"), "body not captured: {:?}", text);
+                assert!(
+                    text.contains("indented thought"),
+                    "body not captured: {:?}",
+                    text
+                );
             }
             _ => unreachable!(),
         }
@@ -987,14 +1082,31 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::ToolResult { .. }))
             .collect();
-        assert_eq!(results.len(), 1, "expected one ToolResult event; got {:?}", events);
+        assert_eq!(
+            results.len(),
+            1,
+            "expected one ToolResult event; got {:?}",
+            events
+        );
         match &results[0] {
             RunEvent::ToolResult { output, .. } => {
                 // The body is plain text (not JSON), so output is a JSON string.
                 let as_str = output.as_str().expect("output should be a JSON string");
-                assert!(as_str.contains("first line"), "missing 'first line' in {:?}", as_str);
-                assert!(as_str.contains("second line"), "missing 'second line' in {:?}", as_str);
-                assert!(as_str.contains("third line"), "missing 'third line' in {:?}", as_str);
+                assert!(
+                    as_str.contains("first line"),
+                    "missing 'first line' in {:?}",
+                    as_str
+                );
+                assert!(
+                    as_str.contains("second line"),
+                    "missing 'second line' in {:?}",
+                    as_str
+                );
+                assert!(
+                    as_str.contains("third line"),
+                    "missing 'third line' in {:?}",
+                    as_str
+                );
             }
             _ => unreachable!(),
         }
@@ -1018,9 +1130,18 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::FileEdit { .. }))
             .collect();
-        assert_eq!(file_edits.len(), 1, "expected one FileEdit event for Write tool; got {:?}", events);
+        assert_eq!(
+            file_edits.len(),
+            1,
+            "expected one FileEdit event for Write tool; got {:?}",
+            events
+        );
         match &file_edits[0] {
-            RunEvent::FileEdit { additions, deletions, .. } => {
+            RunEvent::FileEdit {
+                additions,
+                deletions,
+                ..
+            } => {
                 assert_eq!(*additions, 2, "expected 2 additions");
                 assert_eq!(*deletions, 0, "expected 0 deletions");
             }
@@ -1031,7 +1152,11 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::ToolCall { .. }))
             .collect();
-        assert!(tool_calls.is_empty(), "Write+diff must not emit ToolCall; got {:?}", events);
+        assert!(
+            tool_calls.is_empty(),
+            "Write+diff must not emit ToolCall; got {:?}",
+            events
+        );
     }
 
     // ── GAP: State resilience — tool-call header interrupts thinking block ───
@@ -1054,10 +1179,19 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::Thinking { .. }))
             .collect();
-        assert_eq!(thinking.len(), 1, "expected one Thinking event on interrupt; got {:?}", events);
+        assert_eq!(
+            thinking.len(),
+            1,
+            "expected one Thinking event on interrupt; got {:?}",
+            events
+        );
         match &thinking[0] {
             RunEvent::Thinking { text, .. } => {
-                assert!(text.contains("contemplating"), "thinking body not captured: {:?}", text);
+                assert!(
+                    text.contains("contemplating"),
+                    "thinking body not captured: {:?}",
+                    text
+                );
             }
             _ => unreachable!(),
         }
@@ -1083,12 +1217,25 @@ mod tests {
         let mut p = parser();
         // \xFF and \xFE are not valid in any UTF-8 sequence.
         let events = p.feed(b"hello \xFF\xFE world\n");
-        assert_eq!(events.len(), 1, "expected exactly one event; got {:?}", events);
+        assert_eq!(
+            events.len(),
+            1,
+            "expected exactly one event; got {:?}",
+            events
+        );
         match &events[0] {
             RunEvent::System { text, .. } => {
                 // The lossy replacement must contain the valid ASCII portions.
-                assert!(text.contains("hello"), "expected 'hello' in lossy text: {:?}", text);
-                assert!(text.contains("world"), "expected 'world' in lossy text: {:?}", text);
+                assert!(
+                    text.contains("hello"),
+                    "expected 'hello' in lossy text: {:?}",
+                    text
+                );
+                assert!(
+                    text.contains("world"),
+                    "expected 'world' in lossy text: {:?}",
+                    text
+                );
             }
             other => panic!("expected System event for invalid UTF-8, got {:?}", other),
         }
@@ -1109,11 +1256,20 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::ToolCall { .. }))
             .collect();
-        assert_eq!(tool_calls.len(), 1, "expected one ToolCall with null input; got {:?}", events);
+        assert_eq!(
+            tool_calls.len(),
+            1,
+            "expected one ToolCall with null input; got {:?}",
+            events
+        );
         match &tool_calls[0] {
             RunEvent::ToolCall { name, input, .. } => {
                 assert_eq!(name, "Foo");
-                assert!(input.is_null(), "expected null input for empty body; got {:?}", input);
+                assert!(
+                    input.is_null(),
+                    "expected null input for empty body; got {:?}",
+                    input
+                );
             }
             _ => unreachable!(),
         }
@@ -1122,7 +1278,11 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, RunEvent::System { .. }))
             .collect();
-        assert!(system_events.is_empty(), "empty body must not produce System event; got {:?}", events);
+        assert!(
+            system_events.is_empty(),
+            "empty body must not produce System event; got {:?}",
+            events
+        );
     }
 
     // ── GAP: Adjacent tool calls with no blank line between ─────────────────
@@ -1159,9 +1319,22 @@ mod tests {
                 }
             })
             .collect();
-        assert_eq!(tool_calls.len(), 2, "expected two ToolCall events (Alpha and Beta); got {:?}", events);
-        assert_eq!(tool_calls[0], ("Alpha", true), "first call must be Alpha with null input");
-        assert_eq!(tool_calls[1], ("Beta", true), "second call must be Beta with null input");
+        assert_eq!(
+            tool_calls.len(),
+            2,
+            "expected two ToolCall events (Alpha and Beta); got {:?}",
+            events
+        );
+        assert_eq!(
+            tool_calls[0],
+            ("Alpha", true),
+            "first call must be Alpha with null input"
+        );
+        assert_eq!(
+            tool_calls[1],
+            ("Beta", true),
+            "second call must be Beta with null input"
+        );
     }
 
     // ── GAP: CR-only (bare \r without \n) stays buffered ────────────────────
@@ -1175,18 +1348,35 @@ mod tests {
         let mut p = parser();
         // Feed text with a bare CR — no newline yet.
         let e1 = p.feed(b"hello\rworld");
-        assert!(e1.is_empty(), "bare CR must not trigger line processing; got {:?}", e1);
+        assert!(
+            e1.is_empty(),
+            "bare CR must not trigger line processing; got {:?}",
+            e1
+        );
 
         // Now supply the newline.  The \r is mid-buffer, not trailing, so it is
         // NOT stripped; the decoded line contains the embedded CR.
         let e2 = p.feed(b"\n");
-        assert_eq!(e2.len(), 1, "expected one event after newline; got {:?}", e2);
+        assert_eq!(
+            e2.len(),
+            1,
+            "expected one event after newline; got {:?}",
+            e2
+        );
         match &e2[0] {
             RunEvent::AssistantText { text, .. } => {
                 // The \r is embedded in the text (not stripped, since stripping
                 // only applies to a trailing \r immediately before \n).
-                assert!(text.contains("hello"), "expected 'hello' in text: {:?}", text);
-                assert!(text.contains("world"), "expected 'world' in text: {:?}", text);
+                assert!(
+                    text.contains("hello"),
+                    "expected 'hello' in text: {:?}",
+                    text
+                );
+                assert!(
+                    text.contains("world"),
+                    "expected 'world' in text: {:?}",
+                    text
+                );
             }
             other => panic!("expected AssistantText, got {:?}", other),
         }
@@ -1209,7 +1399,12 @@ mod tests {
 
         // Deliver the newline in its own chunk.
         let e4 = p.feed(b"\n");
-        assert_eq!(e4.len(), 1, "expected one event once newline arrives; got {:?}", e4);
+        assert_eq!(
+            e4.len(),
+            1,
+            "expected one event once newline arrives; got {:?}",
+            e4
+        );
         match &e4[0] {
             RunEvent::AssistantText { text, .. } => {
                 assert_eq!(text, "chunk_two_three");
