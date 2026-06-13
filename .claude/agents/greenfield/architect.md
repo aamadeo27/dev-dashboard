@@ -49,49 +49,60 @@ Content lives in sub-docs:
 
 ### 2. Epics and Tasks
 
-**Folder structure** — write to `docs/epics/`:
+**Folder structure** — write to `docs/epics/`. One **folder** per Epic; one **file** per Task inside it. This is the layout the headless orchestrators consume (`workflows/task_feature`, `workflows/wave`, `workflows/epic`) — they glob `docs/epics/*/<TASK_ID>.md` for tasks and `docs/epics/<id>*/DESCRIPTION.md` for epics. Do **not** emit one flat file per epic with tasks inline; the orchestrators cannot read that.
 
 ```
 docs/epics/
-├── README.md         index of all epics (id, title, status, inter-epic deps)
-├── 001-<slug>.md     one file per epic
-├── 002-<slug>.md
+├── README.md              index of all epics (id, title, status, inter-epic deps)
+├── 001-<slug>/
+│   ├── DESCRIPTION.md     epic overview + wave plan
+│   ├── T01.md             one file per task
+│   └── T02.md
+├── 002-<slug>/
+│   ├── DESCRIPTION.md
+│   └── ...
 └── ...
 ```
 
 **`docs/epics/README.md`** (index):
 - One row per epic with: id, title, one-line goal, status (`planned` / `in-progress` / `done`), dependencies on other epics (if any), recommended order.
 
-**Per-epic file `docs/epics/NNN-<slug>.md`**:
+**Per-epic `docs/epics/NNN-<slug>/DESCRIPTION.md`**:
 - **Title** and one-paragraph goal
 - **Motivation**: which Requirements / UI flows this Epic covers
 - **Definition of Done**: what "done" means at the Epic level
-- **Tasks**: numbered list (`<epic-id>.T01`, `<epic-id>.T02`, ...). For each Task:
-  - title, description
-  - tag (`frontend` / `backend` / `infra` / `shared`)
-  - **dependencies**: other Task ids (within the Epic or from earlier Epics — use full id `001.T03` if cross-Epic)
-  - acceptance criteria
-  - **kb-refs**: list the specific KB items this Task needs. Format:
-    ```
-    kb-refs:
-      patterns:    [error-handling, auth-flow]
-      contracts:   [user-api, session-token]
-      conventions: [naming, testing]
-      tech-stack:  [react, postgres]
-    ```
-    Only list items that exist in `docs/kb/<sub-doc>/`. Agents read only these items plus each folder's `README.md`. Leave a category out if no item applies.
-- **Dependency graph & parallelism plan**: required section. List the waves explicitly so the orchestrator does not have to recompute. Format:
+- **`deps:` line** — cross-epic dependencies as a comma-separated list of epic ids (`deps: 001, 002`), or omit if none. The Epic-execution orchestrator parses this and refuses to run while any listed epic is not `done` in `README.md`.
+- **Dependency graph & parallelism plan**: required section, with this exact `##` header text. List the waves explicitly so the orchestrator does not have to recompute. Format:
   ```
+  ## Dependency graph & parallelism plan
+
   Wave 1 (parallel): T01, T05         # no deps
   Wave 2 (serial T08 then T02): T08, T02   # T08 depends on T01; T02 depends on T01
   Wave 3 (parallel): T03, T04
   ```
-  Mark Tasks that must serialize together (shared files, contention on the same module) explicitly. If two Tasks could run parallel but share files heavily → serialize them in the plan and note why.
+  Task ids here must match the `T*.md` filenames exactly. Mark Tasks that must serialize together (shared files, contention on the same module) explicitly. If two Tasks could run parallel but share files heavily → serialize them in the plan and note why.
 - **Risks / open questions** if any
 
+**Per-task `docs/epics/NNN-<slug>/T01.md`** — one file per Task; the stem is the Task id passed to `--task`:
+- **Title** as the first `#` heading (the orchestrator reads this as the task name)
+- **description**
+- **tag** (`frontend` / `backend` / `infra` / `shared`)
+- **`deps:` line** — other Task ids this Task depends on, comma-separated (`deps: T01, T05`), or omit if none. Use the bare task id for same-Epic deps; use the full id `001.T03` for cross-Epic. The wave runner parses this line to build tiers; cross-epic ids are ignored for in-wave ordering.
+- **acceptance criteria**
+- **kb-refs**: list the specific KB items this Task needs. Format:
+  ```
+  kb-refs:
+    patterns:    [error-handling, auth-flow]
+    contracts:   [user-api, session-token]
+    conventions: [naming, testing]
+    tech-stack:  [react, postgres]
+  ```
+  Only list items that exist in `docs/kb/<sub-doc>/`. Agents read only these items plus each folder's `README.md`. Leave a category out if no item applies.
+
 **Rules**:
-- One Epic per file. Do not bundle.
-- Use zero-padded numeric ids (`001`, `002`, ...). Slug is lowercase-kebab.
+- One Epic per folder, one Task per file. Do not bundle epics into a single file or tasks inline.
+- Use zero-padded numeric epic ids (`001`, `002`, ...). Slug is lowercase-kebab. Task filenames are `T01.md`, `T02.md`, ... (or `T1.1.md` style — any stem, as long as the wave plan and `deps:` lines use the same ids).
+- Every Task id in a `DESCRIPTION.md` wave plan must have a matching `T*.md` file, and vice versa.
 - Order tasks so frontend and backend can run in parallel where possible.
 - Mark inter-Epic deps explicitly; the Epic-execution sequence will refuse to run if cross-Epic deps are unsatisfied.
 
@@ -107,8 +118,9 @@ When invoked with `adoption=true` (from `14-project-adoption`):
   - `contracts`: from public API surface, route definitions, exported types, DB schema.
   - `conventions`: from observed naming, folder layout, lint config, test layout.
 - Mark every adoption-time decision or assumption with `> [adoption-assumption] <basis>` so it can be verified.
-- **Epics/Tasks under adoption** are scoped to **pending gaps only** — diffs between current code and the now-locked Requirements/UI/UX. If the codebase already covers everything, produce `docs/epics/README.md` with a one-line "No pending Epics — backlog empty" note and no Epic files.
-- Tasks emitted by `gf_devops-engineer` and `monitor` in adoption mode get appended to an Epic you create (`NNN-infra-gaps`, `NNN-monitoring-gaps`) or to an existing fitting Epic.
+- **Epics/Tasks under adoption** are scoped to **pending gaps only** — diffs between current code and the now-locked Requirements/UI/UX. If the codebase already covers everything, produce `docs/epics/README.md` with a one-line "No pending Epics — backlog empty" note and no Epic folders.
+- If pre-existing epic docs are present in a non-canonical shape (e.g. one flat file per epic with tasks inline), convert them to the canonical folder layout — split each into `NNN-<slug>/DESCRIPTION.md` plus one `T*.md` per Task — rather than leaving them as-is.
+- Tasks emitted by `gf_devops-engineer` and `monitor` in adoption mode get appended to an Epic you create (`NNN-infra-gaps/`, `NNN-monitoring-gaps/`) or to an existing fitting Epic.
 - Same loop-back rules for business gaps; same `tech-decision-mode` semantics.
 
 ## Process
@@ -117,7 +129,7 @@ When invoked with `adoption=true` (from `14-project-adoption`):
 2. List open questions. Separate **business** (escalate to user) from **technical** (decide yourself unless override set).
 3. Choose stack (or confirm given stack).
 4. Draft Knowledge Base.
-5. Decompose into Epics → Tasks. Write one file per Epic under `docs/epics/`; maintain `docs/epics/README.md` as the index.
+5. Decompose into Epics → Tasks. Write one **folder** per Epic under `docs/epics/` (a `DESCRIPTION.md` plus one `T*.md` per Task); maintain `docs/epics/README.md` as the index.
 6. Review: every requirement covered, every UI screen has backing tasks, tasks are parallelizable, sizes are right, dependencies are explicit.
 
 ## Logging

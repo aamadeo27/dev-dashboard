@@ -572,7 +572,7 @@ No remote telemetry, no Datadog, no Sentry. The app explicitly excludes remote t
 
 ## 12. Gaps and Known Issues
 
-The following gaps exist between the plan and current on-disk state. Each has a corresponding task in `docs/epics/epic-0-bootstrap.md`.
+The following gaps exist between the plan and current on-disk state. Each has a corresponding task in `docs/epics/epic-0-bootstrap/`.
 
 | Gap | Task |
 |---|---|

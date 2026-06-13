@@ -8,7 +8,7 @@
 > `.claude/monitoring.md` spec, plus a **Current instrumentation status** subsection
 > per component (added during adoption) recording what exists in the Rust code today
 > vs. what is still pending. Pending work is tracked by **Epic 9 — Observability**
-> (`docs/epics/epic-9-observability.md`, T9.1–T9.5). Inferred items are marked
+> (`docs/epics/epic-9-observability/`, T9.1–T9.5). Inferred items are marked
 > `> [adoption-assumption] …`.
 
 ## 0. Scope
@@ -422,7 +422,7 @@ None. This is a local-only app (NFR-8): no external monitoring service, no alert
 
 ## 6. Setup / Gap Tasks → Epic 9
 
-The original spec's setup tasks map 1:1 to **Epic 9 — Observability** (`docs/epics/epic-9-observability.md`), which already exists. No new tasks are emitted by this adoption pass — the pending instrumentation surfaced in the audit is fully covered.
+The original spec's setup tasks map 1:1 to **Epic 9 — Observability** (`docs/epics/epic-9-observability/`), which already exists. No new tasks are emitted by this adoption pass — the pending instrumentation surfaced in the audit is fully covered.
 
 | Task | Covers | Audit status it closes |
 |---|---|---|

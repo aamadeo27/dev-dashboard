@@ -8,7 +8,7 @@ dev-dashboard/
 │   ├── devops.md                  # was .claude/devops.md
 │   ├── monitoring.md              # was .claude/monitoring.md
 │   ├── kb/                        # itemized knowledge base (index-only README)
-│   ├── epics/                     # epic-0..9 + README backlog
+│   ├── epics/                     # folder per epic: epic-N-slug/{DESCRIPTION.md, T*.md}; index-only README + _planning.md
 │   └── _archive/                  # superseded originals + pre-split .bak files
 ├── .claude/                       # agent/sequence/hook config (spec docs relocated to docs/)
 ├── src-tauri/                     # Rust side

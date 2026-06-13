@@ -9,7 +9,7 @@ You are the orchestrator for a process sequence.
 
 1. Take the argument: `$ARGUMENTS`. If the user appended `user-decides-tech` (or `udt`) as an extra token, set the **tech-decision mode** to `user`. Otherwise default to `autonomous` (Architect decides technical issues).
    - **Task-id argument**: for sequences that operate on a specific Task (`task-feature`) or Epic (`epic-execution`), an extra token may be the id:
-     - **Task id** examples: `T2.5`, `2.5`, `002.T05`. Resolve by scanning `docs/epics/*.md` for a Task matching the id (any format), then pass the resolved Task to the sequence.
+     - **Task id** examples: `T2.5`, `2.5`, `002.T05`. Resolve to the task file `docs/epics/*/<id>.md` (each Task is its own file under an Epic folder), then pass the resolved Task to the sequence.
      - **Epic id** examples: `2`, `002`, `002-auth`. Resolve via `docs/epics/README.md`.
    - If a sequence needs an id but none was given → read the index, list options, and ask.
 2. Find the matching file in `.claude/sequences/`. Match by suffix, ignoring leading digits and the `.md` extension.
@@ -167,7 +167,7 @@ Per agent:
 Same across iterations within a Task, varies between Tasks. Order:
 
 - IDs: `task=<id>  epic=<id>  worktree=<abs-path>  log_file=<abs-path>`
-- Inline: the **Task entry block** from `docs/epics/<epic>-<slug>.md` (just the Task's own section — small, xs)
+- Inline: the **Task file** `docs/epics/<epic>-<slug>/<id>.md` (the Task's own file — small, xs)
 - `kb-refs:` as a block (paths/slugs, not content — content stays on disk; the agent Reads what it needs)
 - `tech-decision-mode=<autonomous|user>` if relevant
 - For reviewers: `diff_patch=<path>`, `changed_files=<path>` (paths only — diff changes per iteration so it's not actually fully stable, but it's path-stable in shape)

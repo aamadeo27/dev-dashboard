@@ -43,7 +43,7 @@ The app exists to remove the friction of context-switching between terminals, ID
 - **US-12**: As a developer, I want to tag my projects and filter the dashboard by tag, so I can focus on a subset (e.g. `work`, `oss`, `rust`) when I have many projects registered.
   > [adoption-assumption] Inferred from shipped `Project.tags: Vec<String>` (KB contract `project.md`), `TagEditorPopover.tsx`, and tag-chip filtering wired into `Dashboard.tsx`. Not in original `.claude/requirements.md`.
 - **US-13**: As a developer, I want to see my Claude usage / rate-limit status at a glance from the dashboard, so I know whether I have budget before launching a sequence.
-  > [adoption-assumption] Inferred from shipped `RateLimitPill` component + `useUsage` hook + `UsageSnapshot` contract + Epic 7 (`docs/epics/epic-7-usage.md`). Not in original `.claude/requirements.md`.
+  > [adoption-assumption] Inferred from shipped `RateLimitPill` component + `useUsage` hook + `UsageSnapshot` contract + Epic 7 (`docs/epics/epic-7-usage/`). Not in original `.claude/requirements.md`.
 
 ---
 
@@ -65,7 +65,7 @@ The app exists to remove the friction of context-switching between terminals, ID
   - **FR-1.6.3**: Duplicate tags are silently deduplicated — adding an existing tag is a no-op.
     > [adoption-assumption] `TagEditorPopover.handleAdd` rejects when `tags.includes(trimmed)`.
   - **FR-1.6.4**: Each tag is capped at **32 characters**. Enforced in **both** the UI (tag input `maxLength=32`) and the backend (`set_project_tags` rejects/truncates over-length tags). [Resolved OQ-5, adoption 2026-06-13.]
-    > [adoption-assumption] Limit (32) and dual enforcement are a confirmed product decision. Enforcement was NOT present in code at adoption time — tracked by task T2.9 (see `docs/epics/epic-2-project-registry-git.md`).
+    > [adoption-assumption] Limit (32) and dual enforcement are a confirmed product decision. Enforcement was NOT present in code at adoption time — tracked by task T2.9 (see `docs/epics/epic-2-project-registry-git/T2.9.md`).
   - **FR-1.6.5**: The dashboard renders the union of all tags as filter chips; selecting chips filters the visible projects. Multiple selected chips combine with **AND** semantics (a project must carry every selected tag to remain visible).
     > Code-confirmed AND: `selectedTags.every(...)` in `src/routes/Dashboard.tsx`. [Resolved OQ-6, adoption 2026-06-13.]
 
@@ -120,7 +120,7 @@ The app exists to remove the friction of context-switching between terminals, ID
 
 ### 4.7 Usage Monitoring
 
-> [adoption-assumption] Entire FR-7 section added during adoption from shipped `UsageSnapshot` contract, `RateLimitPill`/`useUsage` frontend, and Epic 7 (`docs/epics/epic-7-usage.md`). The pill UI was still a stub on branch `feat/T4.7-step-failure-command` at adoption time; backend contract + epic spec are the evidence. Verify behavior once Epic 7 lands.
+> [adoption-assumption] Entire FR-7 section added during adoption from shipped `UsageSnapshot` contract, `RateLimitPill`/`useUsage` frontend, and Epic 7 (`docs/epics/epic-7-usage/`). The pill UI was still a stub on branch `feat/T4.7-step-failure-command` at adoption time; backend contract + epic spec are the evidence. Verify behavior once Epic 7 lands.
 
 - **FR-7.1**: The dashboard top bar shows a **usage pill** summarizing current Claude usage / rate-limit status (US-13).
   > [adoption-assumption] `RateLimitPill` component + Dashboard top-bar placement (Epic 7 / UI spec §5.2).

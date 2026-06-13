@@ -25,7 +25,7 @@ You are the Architect for an existing project. Evaluate a change request against
 3. Impact map: components, contracts, data shapes, monitoring, security touched.
 4. Decide: extend vs. refactor vs. introduce new component. Justify.
 5. Plan migrations / data backfills if data shapes change.
-6. Decompose into Tasks. If more than 2 Tasks → create a new `docs/epics/NNN-<slug>.md` and update `docs/epics/README.md`. If 1–2 Tasks → append to an existing Epic file or create a small new one.
+6. Decompose into Tasks. If more than 2 Tasks → create a new Epic folder `docs/epics/NNN-<slug>/` (a `DESCRIPTION.md` plus one `T*.md` per Task) and update `docs/epics/README.md`. If 1–2 Tasks → add `T*.md` files to an existing Epic folder or create a small new one.
 
 ## Output
 
@@ -40,28 +40,34 @@ Update the existing `docs/kb/` structure (index + sub-docs). Rules:
 
 ### 2. Epics and Tasks
 
-**Folder structure** — same shape as greenfield:
+**Folder structure** — same shape as greenfield: one **folder** per Epic, one **file** per Task. The headless orchestrators glob `docs/epics/*/<TASK_ID>.md` and `docs/epics/<id>*/DESCRIPTION.md`, so a flat file per epic with tasks inline will not be picked up.
 
 ```
 docs/epics/
-├── README.md         index (existing; update it)
-├── NNN-<slug>.md     one file per new Epic
+├── README.md              index (existing; update it)
+├── NNN-<slug>/
+│   ├── DESCRIPTION.md     epic overview + wave plan
+│   ├── T01.md             one file per task
+│   └── ...
 └── ...
 ```
 
 **For this change**:
-- If the change produces **more than 2 Tasks** → create a new Epic file `docs/epics/NNN-<slug>.md`, using the next free id, and add a row to `docs/epics/README.md`.
-- If the change is **1–2 Tasks** → append them under an existing Epic if one fits, otherwise create a small new Epic file.
+- If the change produces **more than 2 Tasks** → create a new Epic folder `docs/epics/NNN-<slug>/`, using the next free id, and add a row to `docs/epics/README.md`.
+- If the change is **1–2 Tasks** → add their `T*.md` files under an existing Epic folder if one fits, otherwise create a small new Epic folder.
 
-**Per-Epic file contents** (same as greenfield):
+**`DESCRIPTION.md` contents** (same as greenfield):
 - Title, goal, motivation (link the change request)
 - Definition of Done
-- Tasks (`<epic-id>.T01`, ...): title, description, tag (`frontend` / `backend` / `infra` / `shared`), **dependencies** (intra-Epic or full id `NNN.TXX` for cross-Epic), acceptance criteria, **kb-refs** (specific KB items needed — same shape as greenfield: `patterns`, `contracts`, `conventions`, `tech-stack` lists of item slugs), **regression notes** (specific to evolution).
-- **Dependency graph & parallelism plan**: required. Same format as greenfield — list waves explicitly so the orchestrator does not have to recompute. Serialize Tasks that share files even if their formal deps allow parallel.
+- **`deps:` line** — cross-epic dependencies (`deps: 001, 002`) or omit if none.
+- **Dependency graph & parallelism plan**: required, with the exact `## Dependency graph & parallelism plan` header. Same format as greenfield — list waves explicitly so the orchestrator does not have to recompute. Task ids must match the `T*.md` filenames. Serialize Tasks that share files even if their formal deps allow parallel.
 - Risks / open questions
 
+**Per-task `T01.md` contents** (same as greenfield): title as first `#` heading, description, tag (`frontend` / `backend` / `infra` / `shared`), a **`deps:` line** (bare task id intra-Epic, full id `NNN.TXX` cross-Epic, or omit if none), acceptance criteria, **kb-refs** (`patterns`, `contracts`, `conventions`, `tech-stack` lists of item slugs), **regression notes** (specific to evolution).
+
 **Rules**:
-- One Epic per file. Update the index. Use zero-padded numeric ids.
+- One Epic per folder, one Task per file. Update the index. Use zero-padded numeric ids.
+- Every Task id in the wave plan must have a matching `T*.md` file, and vice versa.
 - Mark inter-Epic deps explicitly; Epic-execution will refuse to run if unsatisfied.
 
 ### 3. Impact & risk summary
