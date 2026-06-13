@@ -30,7 +30,7 @@ jobs:
 
       # --- Rust toolchain ---
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@4305c38b25b97a56b7ead356f2a1d7d9ef993260 # stable (2024-11-01)
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: clippy, rustfmt
 
@@ -41,7 +41,7 @@ jobs:
 
       # --- Node / pnpm ---
       - name: Install pnpm
-        uses: pnpm/action-setup@a3252b01235470b1af1eecfd42a25700cb7f695e # v4.1.0
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
           version: 9
 
