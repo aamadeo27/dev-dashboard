@@ -1,0 +1,12 @@
+# Normalize line endings to LF on checkout across all platforms so tooling
+# (Biome formatter, rustfmt) sees consistent input on Windows CI runners,
+# which would otherwise check out CRLF under core.autocrlf.
+* text=auto eol=lf
+
+# Keep binary assets untouched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary

@@ -234,10 +234,17 @@ fn maybe_kill_pid(pid: u32, claude_cli_path: Option<&Path>, system: &System, run
         }
     };
 
-    // Normalize both paths to string for comparison (handles different
-    // separator styles on Windows).
-    let expected_str = expected_exe.to_string_lossy().to_lowercase();
-    let process_str = process_exe.to_string_lossy().to_lowercase();
+    // Canonicalize both paths before comparing so symlinks resolve (e.g. on
+    // Linux `/bin` is a symlink to `/usr/bin`, so a configured `/bin/sleep`
+    // and the sysinfo-reported `/usr/bin/sleep` refer to the same exe). Fall
+    // back to the raw path if canonicalization fails (e.g. file removed).
+    // Lower-casing handles case-insensitive path styles on Windows.
+    let expected_canon =
+        std::fs::canonicalize(expected_exe).unwrap_or_else(|_| expected_exe.to_path_buf());
+    let process_canon =
+        std::fs::canonicalize(process_exe).unwrap_or_else(|_| process_exe.to_path_buf());
+    let expected_str = expected_canon.to_string_lossy().to_lowercase();
+    let process_str = process_canon.to_string_lossy().to_lowercase();
 
     if expected_str != process_str {
         tracing::info!(
