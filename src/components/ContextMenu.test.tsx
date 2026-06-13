@@ -7,7 +7,11 @@ import ContextMenu from "./ContextMenu";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeItems(overrides: Array<Partial<{ label: string; onClick: () => void; danger?: boolean; disabled?: boolean }>> = []) {
+function makeItems(
+  overrides: Array<
+    Partial<{ label: string; onClick: () => void; danger?: boolean; disabled?: boolean }>
+  > = []
+) {
   return overrides.map((o) => ({
     label: o.label ?? "Item",
     onClick: o.onClick ?? vi.fn(),
@@ -40,12 +44,7 @@ describe("ContextMenu — rendering", () => {
 
   it("positions the menu at the given x/y coordinates (fixed)", () => {
     const { container } = render(
-      <ContextMenu
-        items={makeItems([{ label: "Item" }])}
-        x={42}
-        y={99}
-        onClose={vi.fn()}
-      />
+      <ContextMenu items={makeItems([{ label: "Item" }])} x={42} y={99} onClose={vi.fn()} />
     );
     const menu = container.firstChild as HTMLElement;
     expect(menu.style.position).toBe("fixed");
@@ -96,14 +95,7 @@ describe("ContextMenu — click behaviour", () => {
 
   it("calls onClose after item.onClick", () => {
     const onClose = vi.fn();
-    render(
-      <ContextMenu
-        items={makeItems([{ label: "A" }])}
-        x={0}
-        y={0}
-        onClose={onClose}
-      />
-    );
+    render(<ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "A" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -132,18 +124,14 @@ describe("ContextMenu — click behaviour", () => {
 describe("ContextMenu — Escape key", () => {
   it("calls onClose when Escape is pressed", () => {
     const onClose = vi.fn();
-    render(
-      <ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />
-    );
+    render(<ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("does not call onClose when a non-Escape key is pressed", () => {
     const onClose = vi.fn();
-    render(
-      <ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />
-    );
+    render(<ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />);
     fireEvent.keyDown(window, { key: "Enter" });
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -156,9 +144,7 @@ describe("ContextMenu — Escape key", () => {
 describe("ContextMenu — outside click", () => {
   it("calls onClose when mousedown fires outside [data-context-menu]", () => {
     const onClose = vi.fn();
-    render(
-      <ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />
-    );
+    render(<ContextMenu items={makeItems([{ label: "A" }])} x={0} y={0} onClose={onClose} />);
     // Simulate a click on document body (outside the menu)
     fireEvent.mouseDown(document.body);
     expect(onClose).toHaveBeenCalledTimes(1);

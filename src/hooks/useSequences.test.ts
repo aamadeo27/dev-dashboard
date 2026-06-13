@@ -172,9 +172,7 @@ describe("useSequences — cache isolation", () => {
     const seqsA = [makeSequence({ name: "seq-a" })];
     const seqsB = [makeSequence({ name: "seq-b" })];
 
-    vi.mocked(listSequences)
-      .mockResolvedValueOnce(seqsA)
-      .mockResolvedValueOnce(seqsB);
+    vi.mocked(listSequences).mockResolvedValueOnce(seqsA).mockResolvedValueOnce(seqsB);
 
     const { wrapper, queryClient } = makeWrapper();
 

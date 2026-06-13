@@ -466,6 +466,7 @@ export default function Settings() {
           {/* Fix 8: proper role=group instead of FormField wrapper with no fieldId */}
           <div style={styles.formField}>
             <span style={styles.labelText}>View mode</span>
+            {/* biome-ignore lint/a11y/useSemanticElements: <fieldset> would impose default border/margin breaking the inline toggle layout; role=group + aria-label is the intended pattern */}
             <div role="group" aria-label="View mode" style={styles.toggleGroup}>
               <button
                 type="button"

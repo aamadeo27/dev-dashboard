@@ -1,8 +1,8 @@
 // useSequences hook — wraps listSequences IPC command via TanStack Query.
 // See docs/tasks/T3.2.md.
 import { useQuery } from "@tanstack/react-query";
-import { listSequences } from "../ipc/commands";
 import type { Sequence } from "../ipc/bindings";
+import { listSequences } from "../ipc/commands";
 
 export const SEQUENCES_QUERY_KEY = (projectId: string) => ["sequences", projectId] as const;
 
