@@ -21,6 +21,10 @@ pub struct SessionHandle {
     /// Sender half of the UserInput channel.  `send_input` pushes text here so
     /// the I/O loop can write a `UserInput` event to the transcript.
     pub input_tx: tokio::sync::mpsc::Sender<String>,
+    /// Sender half of the step-failure response channel.
+    /// `respond_to_step_failure` sends the user's choice here; the I/O loop
+    /// receives it and applies the kill + re-invoke protocol.
+    pub step_failure_tx: tokio::sync::mpsc::Sender<crate::runs::StepFailureChoice>,
 }
 
 /// Manages all active `RunSession` background tasks.

@@ -59,6 +59,14 @@ pub struct Run {
     pub exit_code: Option<i32>,
     pub pid: Option<u32>,
     pub note: Option<String>,
+    /// Set by the system when a run is aborted via `respond_to_step_failure`.
+    /// Distinct from `note` (user-facing) — this is system-set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_note: Option<String>,
+    /// For re-invoked runs: the `run_id` of the original run that triggered
+    /// the Retry / Skip / Continue-fallback that spawned this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
 }
 
 /// A single structured event emitted during a run; tagged union on `type` (snake_case).

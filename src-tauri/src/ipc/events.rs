@@ -31,3 +31,10 @@ pub const RUN_EVENT: &str = "run:event";
 /// Payload shape: `{ run_id: string, status: RunStatus, exit_code: number | null }`.
 /// Frontend counterpart: `RUN_FINISHED` in `src/ipc/events.ts`.
 pub const RUN_FINISHED: &str = "run:finished";
+
+/// Emitted when the parser detects a step-failure sentinel in the child's stdout.
+///
+/// Payload shape: `{ run_id: string }`.
+/// The UI should surface a Retry / Skip / Abort / Continue prompt on this event.
+/// A 60 s auto-Continue fires if no `respond_to_step_failure` command arrives.
+pub const RUN_STEP_FAILURE: &str = "run:step_failure";

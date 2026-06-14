@@ -10,5 +10,6 @@
       "PowerShell(pnpm create *)",
       "PowerShell(Get-ChildItem *)"
     ]
-  }
+  },
+  "autoMode": {}
 }

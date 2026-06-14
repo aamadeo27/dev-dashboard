@@ -29,6 +29,9 @@ When invoked with `adoption=true` (from `14-project-adoption`):
 - For every gap vs the canonical pattern → emit a **Task** appended to an existing Epic, or to a new `NNN-infra-gaps` Epic if none fits. Task acceptance criteria must be concrete (e.g., "CI runs lint on PR", "secrets removed from repo and rotated").
 - Do **not** fix gaps in this sequence — that's the user's choice to run `04` / `13` afterwards.
 - If secrets are committed in git history → flag as `CRITICAL` in the Task and surface to the user immediately (do not silently log).
+- **`.devteam/cicd.json` check** — look for `.devteam/cicd.json` at the project root.
+  - If **absent**: inform the user that the Python orchestrators will run in **local mode** — tasks squash-merge directly without a PR or CI gate. This is valid for local-only or pre-CI projects. Emit a Task (e.g., in `NNN-infra-gaps/`) with acceptance criteria: "Run `/setup-cicd` to generate `.devteam/cicd.json` from the project's CI workflow files, configure branch protection as instructed, then validate with `/workflow task_feature --task <id> --dry-run`." Do **not** block adoption on this.
+  - If **present**: verify it has `remote`, `integration_branch`, and `required_checks` (non-empty). Missing or empty fields → emit a Task to complete it.
 
 ## Process
 
