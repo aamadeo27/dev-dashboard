@@ -287,9 +287,22 @@ impl ProjectRegistry {
 
     /// Replace the tags of a project.
     ///
-    /// Tags are lowercased, trimmed, and deduplicated before saving.
-    /// Returns `AppError::NotFound` if the id does not exist.
+    /// Normalization order: trim → lowercase → 32-character limit check → dedup.
+    /// Returns `AppError::InvalidInput` if any tag exceeds 32 characters (after
+    /// trim + lowercase), or `AppError::NotFound` if the id does not exist.
     pub async fn set_project_tags(&mut self, id: &str, tags: Vec<String>) -> AppResult<Project> {
+        // FR-1.6.4 (T2.9): enforce a 32-character per-tag limit on the backend
+        // (the UI also sets maxLength=32). Checked on the trimmed + lowercased
+        // form so the limit matches what is actually stored.
+        for tag in &tags {
+            let candidate = tag.trim().to_lowercase();
+            if candidate.chars().count() > 32 {
+                return Err(AppError::InvalidInput(format!(
+                    "tag exceeds 32-character limit: \"{candidate}\""
+                )));
+            }
+        }
+
         let normalized = Self::normalize_tags(&tags);
 
         let project = self
@@ -576,6 +589,57 @@ mod tests {
         assert!(
             matches!(err, AppError::NotFound(_)),
             "expected NotFound, got: {err:?}"
+        );
+    }
+
+    // FR-1.6.4 (T2.9): per-tag 32-character limit, enforced on the backend.
+
+    #[tokio::test]
+    async fn set_project_tags_rejects_tag_over_32_chars() {
+        let (_config, mut registry) = make_registry();
+        let (_proj_dir, proj_path) = make_project_dir();
+
+        let project = registry.add_project(proj_path).await.unwrap();
+        let over_limit = "a".repeat(33);
+        let err = registry
+            .set_project_tags(&project.id, vec![over_limit])
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AppError::InvalidInput(_)),
+            "expected InvalidInput for tag > 32 chars, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_project_tags_accepts_tag_exactly_32_chars() {
+        let (_config, mut registry) = make_registry();
+        let (_proj_dir, proj_path) = make_project_dir();
+
+        let project = registry.add_project(proj_path).await.unwrap();
+        let at_limit = "a".repeat(32);
+        let updated = registry
+            .set_project_tags(&project.id, vec![at_limit.clone()])
+            .await
+            .unwrap();
+        assert_eq!(updated.tags, vec![at_limit]);
+    }
+
+    #[tokio::test]
+    async fn set_project_tags_rejects_over_limit_in_mixed_list() {
+        // Mixed valid + over-limit list must still reject (per-tag check,
+        // not just first/single-element).
+        let (_config, mut registry) = make_registry();
+        let (_proj_dir, proj_path) = make_project_dir();
+
+        let project = registry.add_project(proj_path).await.unwrap();
+        let err = registry
+            .set_project_tags(&project.id, vec!["ok".to_string(), "a".repeat(33)])
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AppError::InvalidInput(_)),
+            "expected InvalidInput for mixed list with over-limit tag, got: {err:?}"
         );
     }
 
