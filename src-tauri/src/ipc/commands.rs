@@ -14,7 +14,7 @@ use crate::projects::Project;
 use crate::runs::manager::SessionHandle;
 use crate::runs::session::{build_run_dir, validate_run_id, verify_run_dir_prefix, RunIoContext};
 use crate::runs::transcript::TranscriptWriter;
-use crate::runs::{LaunchInput, Run, RunStatus};
+use crate::runs::{LaunchInput, Run, RunStatus, StepFailureChoice};
 use crate::sequences::Sequence;
 use crate::settings::{Settings, SettingsPatch};
 
@@ -712,6 +712,8 @@ pub async fn launch_run(
         exit_code: None,
         pid: None,
         note: None,
+        exit_note: None,
+        retry_of: None,
     };
 
     // ── 6. Create transcript writer (creates run_dir + files) ─────────────────
@@ -774,11 +776,14 @@ pub async fn launch_run(
     let cancel_token = CancellationToken::new();
     let run_arc = Arc::new(Mutex::new(initial_run.clone()));
     let (input_tx, input_rx) = tokio::sync::mpsc::channel::<String>(32);
+    let (sf_tx, sf_rx) = tokio::sync::mpsc::channel::<StepFailureChoice>(2);
+    let stdin_arc = Arc::new(Mutex::new(child_stdin));
     let handle = Arc::new(SessionHandle {
         cancel: cancel_token.clone(),
-        stdin: Arc::new(Mutex::new(child_stdin)),
+        stdin: stdin_arc.clone(),
         run: run_arc.clone(),
         input_tx,
+        step_failure_tx: sf_tx,
     });
 
     let sessions = state.run_manager.lock().await.sessions_arc();
@@ -807,6 +812,11 @@ pub async fn launch_run(
         cancel: cancel_token,
         sessions: sessions.clone(),
         input_rx,
+        launch_input: input.clone(),
+        cli_path: cli_path.clone(),
+        stdin_arc,
+        step_failure_rx: sf_rx,
+        attached_md_content: attached_md_content.clone(),
     };
     // Detached background task; the JoinHandle is intentionally dropped.
     tokio::task::spawn(
@@ -910,6 +920,49 @@ pub async fn send_input(
         }
         TrySendError::Closed(_) => AppError::InvalidInput("run is not accepting input".to_string()),
     })
+}
+
+/// Respond to a step-failure prompt for an active run.
+///
+/// Sends `choice` to the background I/O loop which is waiting (up to 60 s) for
+/// a response after detecting a `StepFailed` event in the child's stdout.
+///
+/// | Choice   | Action in I/O loop                                               |
+/// |----------|------------------------------------------------------------------|
+/// | Continue | Write `"\n"` to child stdin; if no new output in 2 s → kill + re-invoke |
+/// | Retry    | Kill child, re-invoke with identical `LaunchInput`; `retry_of` set in new run's `meta.json` |
+/// | Skip     | Kill child, re-invoke with `"Skip the previous failing step and continue. " + original prompt` |
+/// | Abort    | Kill child, mark run `RunStatus::Failed` with `exit_note = "Aborted by user"` |
+///
+/// Returns `AppError::NotFound` if no active run has the given `run_id`.
+/// Returns `AppError::InvalidInput` if the channel is closed (the run already
+/// exited or was never in step-failure mode).
+#[tauri::command]
+pub async fn respond_to_step_failure(
+    run_id: String,
+    choice: StepFailureChoice,
+    state: tauri::State<'_, AppState>,
+) -> AppResult<()> {
+    let sessions = state.run_manager.lock().await.sessions_arc();
+
+    let handle = {
+        let map = sessions.lock().await;
+        map.get(&run_id).cloned()
+    };
+
+    let handle = match handle {
+        None => return Err(AppError::NotFound(format!("run id: {}", run_id))),
+        Some(h) => h,
+    };
+
+    handle.step_failure_tx.send(choice).await.map_err(|_| {
+        AppError::InvalidInput(
+            "run is not awaiting a step-failure response (channel closed)".to_string(),
+        )
+    })?;
+
+    tracing::info!(run_id = %run_id, "respond_to_step_failure: choice sent");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1461,6 +1514,143 @@ mod tests {
             matches!(result, Err(AppError::NotFound(_))),
             "send_input must return NotFound for unknown run_id, got: {:?}",
             result
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // T4.7 — respond_to_step_failure lookup logic
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a minimal `SessionHandle` with real channels for tests.
+    fn make_test_handle() -> (
+        std::sync::Arc<SessionHandle>,
+        tokio::sync::mpsc::Receiver<crate::runs::StepFailureChoice>,
+    ) {
+        use crate::runs::{Run, RunStatus};
+        use std::path::PathBuf;
+
+        let (input_tx, _input_rx) = tokio::sync::mpsc::channel::<String>(1);
+        let (sf_tx, sf_rx) = tokio::sync::mpsc::channel::<crate::runs::StepFailureChoice>(2);
+        let run = Arc::new(tokio::sync::Mutex::new(Run {
+            id: "test-run".to_string(),
+            project_id: "proj".to_string(),
+            project_path: PathBuf::from("/tmp"),
+            sequence_name: "seq".to_string(),
+            attached_md_path: None,
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            exit_code: None,
+            pid: None,
+            note: None,
+            exit_note: None,
+            retry_of: None,
+        }));
+        let handle = std::sync::Arc::new(SessionHandle {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            stdin: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            run,
+            input_tx,
+            step_failure_tx: sf_tx,
+        });
+        (handle, sf_rx)
+    }
+
+    /// `respond_to_step_failure` returns `NotFound` for an unknown run_id.
+    #[tokio::test]
+    async fn respond_to_step_failure_returns_not_found_for_unknown_run_id() {
+        let sessions: std::sync::Arc<
+            tokio::sync::Mutex<HashMap<String, std::sync::Arc<SessionHandle>>>,
+        > = std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+        let handle = {
+            let map = sessions.lock().await;
+            map.get("nonexistent").cloned()
+        };
+
+        let result: AppResult<()> = match handle {
+            None => Err(AppError::NotFound("run id: nonexistent".to_string())),
+            Some(h) => h
+                .step_failure_tx
+                .send(crate::runs::StepFailureChoice::Continue)
+                .await
+                .map_err(|_| AppError::InvalidInput("channel closed".to_string())),
+        };
+
+        assert!(
+            matches!(result, Err(AppError::NotFound(_))),
+            "must return NotFound for unknown run_id; got: {:?}",
+            result
+        );
+    }
+
+    /// When a handle is present, sending a choice delivers it to the receiver.
+    #[tokio::test]
+    async fn respond_to_step_failure_delivers_choice_to_receiver() {
+        let (handle, mut sf_rx) = make_test_handle();
+
+        // Simulate the command handler sending a choice.
+        let send_result = handle
+            .step_failure_tx
+            .send(crate::runs::StepFailureChoice::Retry)
+            .await;
+        assert!(send_result.is_ok(), "send must succeed: {:?}", send_result);
+
+        // The receiver (I/O loop) gets the correct variant.
+        let received = sf_rx.recv().await;
+        assert!(
+            matches!(received, Some(crate::runs::StepFailureChoice::Retry)),
+            "receiver must get Retry; got: {:?}",
+            received
+        );
+    }
+
+    /// All four `StepFailureChoice` variants can be sent through the channel.
+    #[tokio::test]
+    async fn respond_to_step_failure_all_variants_deliverable() {
+        use crate::runs::StepFailureChoice;
+
+        let choices = [
+            StepFailureChoice::Continue,
+            StepFailureChoice::Retry,
+            StepFailureChoice::Skip,
+            StepFailureChoice::Abort,
+        ];
+
+        for choice in choices {
+            let (handle, mut sf_rx) = make_test_handle();
+            let choice_json = serde_json::to_string(&choice).unwrap();
+
+            handle
+                .step_failure_tx
+                .send(choice)
+                .await
+                .expect("send must succeed");
+
+            let received = sf_rx.recv().await.expect("receiver must get a value");
+            let received_json = serde_json::to_string(&received).unwrap();
+            assert_eq!(
+                received_json, choice_json,
+                "choice round-trip via channel failed"
+            );
+        }
+    }
+
+    /// Sending to a closed channel (receiver dropped) returns an error.
+    #[tokio::test]
+    async fn respond_to_step_failure_returns_error_when_channel_closed() {
+        let (handle, sf_rx) = make_test_handle();
+        // Drop the receiver to simulate the I/O loop having exited.
+        drop(sf_rx);
+
+        let result = handle
+            .step_failure_tx
+            .send(crate::runs::StepFailureChoice::Abort)
+            .await;
+
+        assert!(
+            result.is_err(),
+            "sending to a closed channel must return an error"
         );
     }
 }

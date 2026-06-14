@@ -3,17 +3,19 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
 use tauri::Emitter;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use super::manager::SessionHandle;
 use super::parser::EventParser;
 use super::transcript::TranscriptWriter;
-use super::{Run, RunStatus};
+use super::{LaunchInput, Run, RunStatus, StepFailureChoice};
 use crate::error::{AppError, AppResult};
 use crate::ipc::events;
 
@@ -34,6 +36,20 @@ pub(crate) struct RunIoContext {
     pub(crate) cancel: CancellationToken,
     pub(crate) sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
     pub(crate) input_rx: tokio::sync::mpsc::Receiver<String>,
+    /// Original launch parameters — needed for re-invocation after step-failure.
+    pub(crate) launch_input: LaunchInput,
+    /// Resolved CLI path — reused for re-invocation without re-querying settings.
+    pub(crate) cli_path: PathBuf,
+    /// Shared stdin handle (same Arc as `SessionHandle.stdin`) used by the
+    /// Continue choice to write "\n" without going through the IPC layer.
+    pub(crate) stdin_arc: Arc<Mutex<Option<tokio::process::ChildStdin>>>,
+    /// Receiver half of the step-failure response channel.
+    /// `respond_to_step_failure` pushes the user's `StepFailureChoice` here.
+    pub(crate) step_failure_rx: tokio::sync::mpsc::Receiver<StepFailureChoice>,
+    /// Pre-read content of `launch_input.attached_md_path`, if any.
+    /// Stored here so re-invocations can write it to the new child's stdin
+    /// without re-reading the file.
+    pub(crate) attached_md_content: Option<Vec<u8>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +155,8 @@ pub async fn verify_run_dir_prefix(project_path: &Path, run_dir: &Path) -> AppRe
 /// parsed events to the transcript in one batch, and emit a single `run:event`
 /// payload to the frontend.
 ///
+/// Returns `true` if any `StepFailed` event was found in the parsed batch.
+///
 /// Called from both the main select! loop and the post-cancel drain block so
 /// that the identical processing logic is not duplicated.
 async fn process_stdout_chunk(
@@ -147,11 +165,14 @@ async fn process_stdout_chunk(
     writer: &mut TranscriptWriter,
     parser: &mut EventParser,
     app_handle: &tauri::AppHandle,
-) {
+) -> bool {
     if let Err(e) = writer.append_raw(chunk).await {
         tracing::warn!(run_id = %run_id, error = %e, "append_raw stdout failed");
     }
     let events_parsed = parser.feed(chunk);
+    let had_step_failed = events_parsed
+        .iter()
+        .any(|e| matches!(e, super::RunEvent::StepFailed { .. }));
     if let Err(e) = writer.append_events(&events_parsed).await {
         tracing::warn!(run_id = %run_id, error = %e, "append_events failed");
     }
@@ -161,20 +182,448 @@ async fn process_stdout_chunk(
             tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:event");
         }
     }
+    had_step_failed
+}
+
+// ---------------------------------------------------------------------------
+// Re-invocation helper
+// ---------------------------------------------------------------------------
+
+/// Prepare a re-invocation of the Claude CLI child process with `new_input`.
+///
+/// Creates a fresh run directory, mints a new `run_id`, records
+/// `retry_of = original_run_id` in the new run's `meta.json`, writes
+/// `attached_md_content` to the new child's stdin (if provided), and inserts
+/// the new `SessionHandle` into `sessions`.
+///
+/// Returns `(new_run_id, RunIoContext)` on success.  The **caller** is
+/// responsible for spawning `run_io_loop` with the returned context — this
+/// keeps `re_invoke_run` free of any recursive `tokio::task::spawn` calls,
+/// which would create a circular `Send` bound that the Rust compiler cannot
+/// resolve statically.
+///
+/// Returns `None` on error (errors are logged; the caller exits its own loop).
+async fn re_invoke_run(
+    original_run_id: &str,
+    project_path: &Path,
+    new_input: LaunchInput,
+    cli_path: &Path,
+    attached_md_content: &Option<Vec<u8>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
+) -> Option<(String, RunIoContext)> {
+    use std::process::Stdio;
+
+    // 1. Mint a new run_id.
+    let new_run_id = uuid::Uuid::now_v7().to_string();
+
+    // 2. Build and verify the new run directory.
+    let run_dir = build_run_dir(project_path, &new_run_id);
+    if let Err(e) = verify_run_dir_prefix(project_path, &run_dir).await {
+        tracing::error!(
+            original_run_id = %original_run_id,
+            new_run_id = %new_run_id,
+            error = %e,
+            "re_invoke_run: run_dir prefix check failed"
+        );
+        return None;
+    }
+
+    // 3. Build the initial Run record for the new run.
+    let initial_run = Run {
+        id: new_run_id.clone(),
+        project_id: new_input.project_id.clone(),
+        project_path: project_path.to_path_buf(),
+        sequence_name: new_input.sequence_name.clone(),
+        attached_md_path: new_input.attached_md_path.clone(),
+        started_at: Utc::now(),
+        ended_at: None,
+        status: RunStatus::Pending,
+        exit_code: None,
+        pid: None,
+        note: None,
+        exit_note: None,
+        retry_of: Some(original_run_id.to_string()),
+    };
+
+    // 4. Create transcript writer (creates run_dir and files).
+    let writer = match TranscriptWriter::create(&new_run_id, &run_dir, &initial_run).await {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(
+                original_run_id = %original_run_id,
+                new_run_id = %new_run_id,
+                error = %e,
+                "re_invoke_run: TranscriptWriter::create failed"
+            );
+            return None;
+        }
+    };
+
+    // 5. Spawn the new child process.
+    let mut cmd = tokio::process::Command::new(cli_path);
+    cmd.arg(&new_input.sequence_name)
+        .current_dir(project_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(
+                original_run_id = %original_run_id,
+                new_run_id = %new_run_id,
+                error = %e,
+                "re_invoke_run: child spawn failed"
+            );
+            return None;
+        }
+    };
+
+    let mut child_stdin = child.stdin.take();
+    let child_stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            tracing::error!(new_run_id = %new_run_id, "re_invoke_run: child stdout missing");
+            return None;
+        }
+    };
+    let child_stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => {
+            tracing::error!(new_run_id = %new_run_id, "re_invoke_run: child stderr missing");
+            return None;
+        }
+    };
+
+    // 6. Write attached_md content to the new child's stdin.
+    if let Some(ref content) = attached_md_content {
+        if !content.is_empty() {
+            if let Some(ref mut stdin) = child_stdin {
+                if let Err(e) = stdin.write_all(content).await {
+                    tracing::warn!(
+                        new_run_id = %new_run_id,
+                        error = %e,
+                        "re_invoke_run: failed to write attached_md to stdin"
+                    );
+                } else if let Err(e) = stdin.write_all(b"\n").await {
+                    tracing::warn!(
+                        new_run_id = %new_run_id,
+                        error = %e,
+                        "re_invoke_run: failed to write attached_md newline to stdin"
+                    );
+                }
+            }
+        }
+    }
+
+    // 7. Build channels and SessionHandle for the new run.
+    let cancel_token = CancellationToken::new();
+    let run_arc = Arc::new(Mutex::new(initial_run.clone()));
+    let (input_tx, input_rx) = tokio::sync::mpsc::channel::<String>(32);
+    let (sf_tx, sf_rx) = tokio::sync::mpsc::channel::<StepFailureChoice>(2);
+    let stdin_arc = Arc::new(Mutex::new(child_stdin));
+    let handle = Arc::new(SessionHandle {
+        cancel: cancel_token.clone(),
+        stdin: stdin_arc.clone(),
+        run: run_arc.clone(),
+        input_tx,
+        step_failure_tx: sf_tx,
+    });
+
+    // 8. Insert handle into sessions map BEFORE returning so the new run is
+    //    visible to IPC commands as soon as the caller spawns the I/O task.
+    {
+        let mut map = sessions.lock().await;
+        map.insert(new_run_id.clone(), handle);
+    }
+
+    // 9. Build and return the RunIoContext; the caller will spawn the I/O loop.
+    let ctx = RunIoContext {
+        run: run_arc,
+        stdout: child_stdout,
+        stderr: child_stderr,
+        child,
+        writer,
+        cancel: cancel_token,
+        sessions: sessions.clone(),
+        input_rx,
+        launch_input: new_input,
+        cli_path: cli_path.to_path_buf(),
+        stdin_arc,
+        step_failure_rx: sf_rx,
+        attached_md_content: attached_md_content.clone(),
+    };
+
+    tracing::info!(
+        original_run_id = %original_run_id,
+        new_run_id = %new_run_id,
+        "re_invoke_run: context prepared, new run ready to spawn"
+    );
+
+    Some((new_run_id, ctx))
 }
 
 // ---------------------------------------------------------------------------
 // Background I/O loop
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Step-failure handler
+// ---------------------------------------------------------------------------
+
+/// Outcome returned by [`handle_step_failure`] to the I/O loop.
+enum StepFailureOutcome {
+    /// Child responded to the Continue newline — keep the outer loop running.
+    Continue,
+    /// Exit the outer I/O loop with the given state.
+    Break {
+        cancelled: bool,
+        exit_note: Option<String>,
+    },
+}
+
+/// Handle the step-failure protocol after a `StepFailed` event is detected.
+///
+/// Emits `run:step_failure`, waits up to 60 s for a [`StepFailureChoice`]
+/// (draining stdout/stderr in the meantime so the child does not block on a
+/// full pipe buffer), then applies the per-choice kill + re-invoke action per
+/// KB §9 item 3 (T4.8 option b).
+///
+/// Returns [`StepFailureOutcome`] so the caller can update `cancelled` /
+/// `exit_note` and decide whether to `break 'io`.
+#[allow(clippy::too_many_arguments)]
+async fn handle_step_failure(
+    run_id: &str,
+    app_handle: &tauri::AppHandle,
+    stdout: &mut tokio::process::ChildStdout,
+    stderr: &mut tokio::process::ChildStderr,
+    child: &mut tokio::process::Child,
+    writer: &mut TranscriptWriter,
+    parser: &mut EventParser,
+    stdin_arc: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
+    step_failure_rx: &mut tokio::sync::mpsc::Receiver<StepFailureChoice>,
+    cancel: &tokio_util::sync::CancellationToken,
+    launch_input: &LaunchInput,
+    cli_path: &Path,
+    attached_md_content: &Option<Vec<u8>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
+    project_path: &Path,
+) -> StepFailureOutcome {
+    tracing::info!(run_id = %run_id, "step failure detected");
+
+    // 1. Emit run:step_failure so the UI can prompt the user.
+    let sf_payload = serde_json::json!({ "run_id": run_id });
+    if let Err(e) = app_handle.emit(events::RUN_STEP_FAILURE, sf_payload) {
+        tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:step_failure");
+    }
+
+    // 2. Wait up to 60 s for a choice, draining stdout/stderr while waiting.
+    let mut stdout_buf = vec![0u8; 8192];
+    let mut stderr_buf = vec![0u8; 8192];
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+
+    let choice = 'sf_wait: loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            tracing::info!(run_id = %run_id, "step_failure: auto-Continue after 60 s timeout");
+            break 'sf_wait StepFailureChoice::Continue;
+        }
+
+        tokio::select! {
+            maybe_choice = step_failure_rx.recv() => {
+                break 'sf_wait maybe_choice.unwrap_or(StepFailureChoice::Continue);
+            }
+            result = stdout.read(&mut stdout_buf) => {
+                match result {
+                    Ok(0) | Err(_) => {
+                        // Child exited while waiting — treat as Continue and let
+                        // the outer loop detect EOF on next iteration.
+                        break 'sf_wait StepFailureChoice::Continue;
+                    }
+                    Ok(n) => {
+                        let _ = process_stdout_chunk(
+                            &stdout_buf[..n], run_id, writer, parser, app_handle,
+                        )
+                        .await;
+                    }
+                }
+            }
+            result = stderr.read(&mut stderr_buf) => {
+                match result {
+                    Ok(0) | Err(_) => {}
+                    Ok(n) => { let _ = writer.append_raw(&stderr_buf[..n]).await; }
+                }
+            }
+            _ = cancel.cancelled() => {
+                tracing::info!(run_id = %run_id, "run cancelled during step-failure wait");
+                if let Err(e) = child.kill().await {
+                    tracing::warn!(run_id = %run_id, error = %e, "child kill failed during sf wait");
+                }
+                return StepFailureOutcome::Break { cancelled: true, exit_note: None };
+            }
+            _ = tokio::time::sleep(remaining) => {
+                tracing::info!(run_id = %run_id, "step_failure: auto-Continue after 60 s timeout");
+                break 'sf_wait StepFailureChoice::Continue;
+            }
+        }
+    };
+
+    // 3. Apply the chosen action.
+    match choice {
+        StepFailureChoice::Continue => {
+            // Write "\n" to stdin to try to unblock the CLI.
+            {
+                let mut sg = stdin_arc.lock().await;
+                if let Some(ref mut stdin) = *sg {
+                    if let Err(e) = stdin.write_all(b"\n").await {
+                        tracing::warn!(
+                            run_id = %run_id,
+                            error = %e,
+                            "step_failure Continue: stdin write failed"
+                        );
+                    }
+                }
+            }
+            // Wait up to 2 s for new stdout output (single select; no loop needed).
+            let mut got_output = false;
+            tokio::select! {
+                result = stdout.read(&mut stdout_buf) => {
+                    if let Ok(n) = result {
+                        if n > 0 {
+                            got_output = true;
+                            let _ = process_stdout_chunk(
+                                &stdout_buf[..n], run_id, writer, parser, app_handle,
+                            )
+                            .await;
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(2000)) => {}
+            }
+
+            if got_output {
+                tracing::info!(
+                    run_id = %run_id,
+                    "step_failure Continue: child produced output, resuming"
+                );
+                StepFailureOutcome::Continue
+            } else {
+                tracing::info!(
+                    run_id = %run_id,
+                    "step_failure Continue: no output in 2s, killing and re-invoking"
+                );
+                if let Err(e) = child.kill().await {
+                    tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Continue fallback)");
+                }
+                if let Some((new_id, new_ctx)) = re_invoke_run(
+                    run_id,
+                    project_path,
+                    launch_input.clone(),
+                    cli_path,
+                    attached_md_content,
+                    sessions,
+                )
+                .await
+                {
+                    spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
+                }
+                StepFailureOutcome::Break {
+                    cancelled: false,
+                    exit_note: None,
+                }
+            }
+        }
+
+        StepFailureChoice::Retry => {
+            tracing::info!(run_id = %run_id, "step_failure: Retry");
+            if let Err(e) = child.kill().await {
+                tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Retry)");
+            }
+            if let Some((new_id, new_ctx)) = re_invoke_run(
+                run_id,
+                project_path,
+                launch_input.clone(),
+                cli_path,
+                attached_md_content,
+                sessions,
+            )
+            .await
+            {
+                spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
+            }
+            StepFailureOutcome::Break {
+                cancelled: false,
+                exit_note: None,
+            }
+        }
+
+        StepFailureChoice::Skip => {
+            tracing::info!(run_id = %run_id, "step_failure: Skip");
+            let mut skip_input = launch_input.clone();
+            skip_input.sequence_name = format!(
+                "Skip the previous failing step and continue. {}",
+                launch_input.sequence_name
+            );
+            if let Err(e) = child.kill().await {
+                tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Skip)");
+            }
+            if let Some((new_id, new_ctx)) = re_invoke_run(
+                run_id,
+                project_path,
+                skip_input,
+                cli_path,
+                attached_md_content,
+                sessions,
+            )
+            .await
+            {
+                spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
+            }
+            StepFailureOutcome::Break {
+                cancelled: false,
+                exit_note: None,
+            }
+        }
+
+        StepFailureChoice::Abort => {
+            tracing::info!(run_id = %run_id, "step_failure: Abort");
+            if let Err(e) = child.kill().await {
+                tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Abort)");
+            }
+            StepFailureOutcome::Break {
+                cancelled: false,
+                exit_note: Some("Aborted by user".to_string()),
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background I/O helpers (spawn)
+// ---------------------------------------------------------------------------
+
+/// Helper: spawn a new `run_io_loop` task from the re-invoke context returned
+/// by `re_invoke_run`.  Extracted here so the `Instrument` import does not
+/// need to be pulled in at the call sites inside the loop body.
+fn spawn_reinvoke_task(app_handle: tauri::AppHandle, new_run_id: String, ctx: RunIoContext) {
+    use tracing::Instrument;
+    let span = tracing::info_span!("run_session", run_id = %new_run_id);
+    tokio::task::spawn(run_io_loop(app_handle, new_run_id, ctx).instrument(span));
+}
+
 /// Spawnable background task that:
 /// 1. Updates run status to `Running` and emits `run:started`.
 /// 2. Streams stdout through `EventParser`, writing events to transcript and
 ///    emitting `run:event` to the frontend.
 /// 3. Appends stderr bytes to `raw.log`.
-/// 4. On cancellation, kills the child.
-/// 5. After the child exits, finalises the run status and emits `run:finished`.
-/// 6. Removes the session from the `sessions` map.
+/// 4. On `StepFailed` event: emits `run:step_failure`, waits up to 60 s for a
+///    `StepFailureChoice`, then applies the kill + re-invoke protocol (T4.8
+///    option b).
+/// 5. On cancellation, kills the child.
+/// 6. After the child exits, finalises the run status and emits `run:finished`.
+/// 7. Removes the session from the `sessions` map.
 ///
 /// The span is instrumented at the `tokio::task::spawn` call site in
 /// `commands.rs` via `.instrument(span)` so that the async-aware
@@ -189,11 +638,16 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
         cancel,
         sessions,
         mut input_rx,
+        launch_input,
+        cli_path,
+        stdin_arc,
+        mut step_failure_rx,
+        attached_md_content,
     } = ctx;
 
     // ── Step 1: mark Running, write meta, emit run:started ──────────────────
 
-    let project_id = {
+    let (project_path, project_id) = {
         let mut run_guard = run.lock().await;
         run_guard.status = RunStatus::Running;
         run_guard.pid = child.id();
@@ -202,6 +656,7 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
 
         let pid = snapshot.pid;
         let project_id = snapshot.project_id.clone();
+        let project_path = snapshot.project_path.clone();
 
         tracing::info!(
             run_id = %run_id,
@@ -214,7 +669,7 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
             tracing::warn!(run_id = %run_id, error = %e, "failed to write meta on start");
         }
 
-        project_id
+        (project_path, project_id)
     };
 
     let started_payload = serde_json::json!({ "run_id": run_id, "project_id": project_id });
@@ -228,24 +683,60 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
     let mut stdout_buf = vec![0u8; 8192];
     let mut stderr_buf = vec![0u8; 8192];
     let mut cancelled = false;
+    // Set by the Abort handler to populate Run.exit_note in meta.
+    let mut step_failure_exit_note: Option<String> = None;
 
-    loop {
+    'io: loop {
         tokio::select! {
             // Read stdout.
             result = stdout.read(&mut stdout_buf) => {
                 match result {
                     Ok(0) => {
                         // EOF on stdout — child has closed its write end.
-                        break;
+                        break 'io;
                     }
                     Ok(n) => {
                         let chunk = &stdout_buf[..n];
-                        // Batch raw append + parse + transcript write + emit.
-                        process_stdout_chunk(chunk, &run_id, &mut writer, &mut parser, &app_handle).await;
+                        let step_failed = process_stdout_chunk(
+                            chunk, &run_id, &mut writer, &mut parser, &app_handle,
+                        )
+                        .await;
+
+                        if step_failed {
+                            // ── Step-failure protocol (T4.7 / KB §9 item 3) ──────────
+                            let outcome = handle_step_failure(
+                                &run_id,
+                                &app_handle,
+                                &mut stdout,
+                                &mut stderr,
+                                &mut child,
+                                &mut writer,
+                                &mut parser,
+                                &stdin_arc,
+                                &mut step_failure_rx,
+                                &cancel,
+                                &launch_input,
+                                &cli_path,
+                                &attached_md_content,
+                                sessions.clone(),
+                                &project_path,
+                            )
+                            .await;
+                            match outcome {
+                                StepFailureOutcome::Continue => {
+                                    // Child responded — continue the outer loop normally.
+                                }
+                                StepFailureOutcome::Break { cancelled: c, exit_note } => {
+                                    cancelled = c;
+                                    step_failure_exit_note = exit_note;
+                                    break 'io;
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         tracing::warn!(run_id = %run_id, error = %e, "stdout read error");
-                        break;
+                        break 'io;
                     }
                 }
             }
@@ -293,7 +784,7 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
                 if let Err(e) = child.kill().await {
                     tracing::warn!(run_id = %run_id, error = %e, "child kill failed");
                 }
-                break;
+                break 'io;
             }
         }
     }
@@ -318,7 +809,11 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
                     match result {
                         Ok(0) | Err(_) => stdout_done = true,
                         Ok(n) => {
-                            process_stdout_chunk(&stdout_buf[..n], &run_id, &mut writer, &mut parser, &app_handle).await;
+                            // Ignore step-failure return during drain.
+                            let _ = process_stdout_chunk(
+                                &stdout_buf[..n], &run_id, &mut writer, &mut parser, &app_handle,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -344,6 +839,9 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
 
     let final_status = if cancelled {
         RunStatus::Stopped
+    } else if step_failure_exit_note.is_some() {
+        // Abort: always Failed regardless of exit code.
+        RunStatus::Failed
     } else if exit_code == Some(0) {
         RunStatus::Completed
     } else {
@@ -364,6 +862,9 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
         run_guard.status = final_status.clone();
         run_guard.ended_at = Some(Utc::now());
         run_guard.exit_code = exit_code;
+        if let Some(ref note) = step_failure_exit_note {
+            run_guard.exit_note = Some(note.clone());
+        }
         let snapshot = run_guard.clone();
         drop(run_guard);
 
@@ -685,6 +1186,127 @@ mod tests {
             matches!(result, Err(AppError::PermissionDenied(_))),
             "run_dir under a sibling project must be rejected with PermissionDenied, got: {:?}",
             result
+        );
+    }
+
+    // ── T4.7: StepFailureChoice serialization ────────────────────────────────
+
+    /// All four `StepFailureChoice` variants must round-trip through JSON.
+    /// This ensures the IPC layer can deserialize choices sent by the frontend.
+    #[test]
+    fn step_failure_choice_serializes_and_deserializes() {
+        let cases = [
+            (StepFailureChoice::Continue, "\"Continue\""),
+            (StepFailureChoice::Retry, "\"Retry\""),
+            (StepFailureChoice::Skip, "\"Skip\""),
+            (StepFailureChoice::Abort, "\"Abort\""),
+        ];
+        for (variant, expected_json) in cases {
+            let serialized =
+                serde_json::to_string(&variant).expect("StepFailureChoice must serialize");
+            assert_eq!(serialized, expected_json, "variant serialization mismatch");
+            let deserialized: StepFailureChoice =
+                serde_json::from_str(&serialized).expect("StepFailureChoice must deserialize");
+            // Re-serialize to compare (enum doesn't implement PartialEq).
+            let re_serialized = serde_json::to_string(&deserialized).unwrap();
+            assert_eq!(re_serialized, expected_json, "round-trip failed");
+        }
+    }
+
+    /// `Run.exit_note` and `Run.retry_of` are optional and default to `None`
+    /// when absent from a deserialized JSON object (backward-compat guard).
+    #[test]
+    fn run_exit_note_and_retry_of_default_to_none_when_absent() {
+        // Simulate an old meta.json that does not have the new fields.
+        let json = r#"{
+            "id": "test-run",
+            "project_id": "proj-1",
+            "project_path": "/tmp/proj",
+            "sequence_name": "my-seq",
+            "attached_md_path": null,
+            "started_at": "2026-01-01T00:00:00Z",
+            "ended_at": null,
+            "status": "Running",
+            "exit_code": null,
+            "pid": null,
+            "note": null
+        }"#;
+        let run: Run =
+            serde_json::from_str(json).expect("must deserialize without exit_note / retry_of");
+        assert!(
+            run.exit_note.is_none(),
+            "exit_note must default to None when absent"
+        );
+        assert!(
+            run.retry_of.is_none(),
+            "retry_of must default to None when absent"
+        );
+    }
+
+    /// `Run.exit_note` and `Run.retry_of` are serialized when `Some` and
+    /// omitted from the JSON output when `None` (space-saving).
+    #[test]
+    fn run_exit_note_and_retry_of_serialize_correctly() {
+        let run = Run {
+            id: "r1".to_string(),
+            project_id: "p1".to_string(),
+            project_path: PathBuf::from("/tmp"),
+            sequence_name: "s".to_string(),
+            attached_md_path: None,
+            started_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            ended_at: None,
+            status: RunStatus::Failed,
+            exit_code: Some(1),
+            pid: None,
+            note: None,
+            exit_note: Some("Aborted by user".to_string()),
+            retry_of: Some("original-run-id".to_string()),
+        };
+        let json = serde_json::to_string(&run).expect("serialize");
+        assert!(
+            json.contains("\"exit_note\":\"Aborted by user\""),
+            "exit_note must be serialized when Some; got: {json}"
+        );
+        assert!(
+            json.contains("\"retry_of\":\"original-run-id\""),
+            "retry_of must be serialized when Some; got: {json}"
+        );
+
+        // When both are None, they must NOT appear in the JSON (skip_serializing_if).
+        let run_no_extras = Run {
+            id: "r2".to_string(),
+            project_id: "p1".to_string(),
+            project_path: PathBuf::from("/tmp"),
+            sequence_name: "s".to_string(),
+            attached_md_path: None,
+            started_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            ended_at: None,
+            status: RunStatus::Running,
+            exit_code: None,
+            pid: None,
+            note: None,
+            exit_note: None,
+            retry_of: None,
+        };
+        let json2 = serde_json::to_string(&run_no_extras).expect("serialize");
+        assert!(
+            !json2.contains("exit_note"),
+            "exit_note must be omitted when None; got: {json2}"
+        );
+        assert!(
+            !json2.contains("retry_of"),
+            "retry_of must be omitted when None; got: {json2}"
+        );
+    }
+
+    /// Skip prefix is correctly prepended to `sequence_name`.
+    #[test]
+    fn skip_prefix_format_is_correct() {
+        let original = "my task";
+        let prefixed = format!("Skip the previous failing step and continue. {}", original);
+        assert_eq!(
+            prefixed,
+            "Skip the previous failing step and continue. my task"
         );
     }
 }

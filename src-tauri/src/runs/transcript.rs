@@ -158,6 +158,8 @@ mod tests {
             exit_code: None,
             pid: None,
             note: None,
+            exit_note: None,
+            retry_of: None,
         }
     }
 

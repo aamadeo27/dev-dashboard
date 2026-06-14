@@ -353,6 +353,8 @@ mod tests {
             exit_code: Some(0),
             pid: None,
             note: None,
+            exit_note: None,
+            retry_of: None,
         };
         let json = serde_json::to_string_pretty(&run).expect("serialize");
         std::fs::write(run_dir.join("meta.json"), json).expect("write meta.json");

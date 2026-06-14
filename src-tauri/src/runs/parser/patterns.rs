@@ -6,8 +6,11 @@ pub const PATTERN_VERSION: &str = "v1-heuristic-2026-05-23";
 
 /// Sentinel line that triggers a `StepFailed` event.
 ///
-/// Currently empty (`""`) so it never fires.  T4.8 will set the real marker.
-pub const STEP_FAILED_SENTINEL: &str = "";
+/// Set to `"STEP_FAILED"` as the pinned mock marker for T4.7.
+/// A mock CLI can emit this exact line to exercise the step-failure protocol.
+/// Will be replaced with the real Claude CLI marker once live behaviour is
+/// captured (KB §9 item 1).
+pub const STEP_FAILED_SENTINEL: &str = "STEP_FAILED";
 
 /// Unicode prefix that marks the beginning of a tool call line.
 /// Example: `⏺ Tool: Read`

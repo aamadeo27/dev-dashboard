@@ -159,6 +159,7 @@ pub fn run() {
                     ipc::commands::launch_run,
                     ipc::commands::stop_run,
                     ipc::commands::send_input,
+                    ipc::commands::respond_to_step_failure,
                 ]
             }
             #[cfg(not(debug_assertions))]
@@ -185,6 +186,7 @@ pub fn run() {
                     ipc::commands::launch_run,
                     ipc::commands::stop_run,
                     ipc::commands::send_input,
+                    ipc::commands::respond_to_step_failure,
                 ]
             }
         })

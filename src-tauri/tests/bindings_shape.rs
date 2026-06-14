@@ -68,6 +68,8 @@ fn run_serializes_to_json() {
         exit_code: Some(0),
         pid: Some(12345),
         note: None,
+        exit_note: None,
+        retry_of: None,
     };
     let v = serde_json::to_value(&r).expect("Run must serialize");
     assert_eq!(v["sequence_name"], "build");

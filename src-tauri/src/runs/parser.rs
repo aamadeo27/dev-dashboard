@@ -817,39 +817,81 @@ mod tests {
         }
     }
 
-    // ── StepFailed sentinel (currently never fires) ───────────────────────────
+    // ── StepFailed sentinel (T4.7: pinned to "STEP_FAILED" for mock CLI) ────
 
+    /// The sentinel is now the mock marker "STEP_FAILED" (pinned for T4.7).
+    /// Feeding the sentinel line must produce exactly one StepFailed event.
     #[test]
-    fn step_failed_sentinel_empty_means_never_fires() {
-        // The sentinel is currently "", so it never matches any real line.
+    fn step_failed_sentinel_fires_on_mock_marker() {
         assert_eq!(
             patterns::STEP_FAILED_SENTINEL,
-            "",
-            "sentinel must be empty per T4.8"
+            "STEP_FAILED",
+            "sentinel must be the T4.7 mock marker"
         );
 
         let mut p = parser();
-        // Feed a line that could be mistaken for the sentinel if it were non-empty.
-        let events = p.feed(b"some line\n");
+        let events = p.feed(b"STEP_FAILED\n");
+        let step_failed_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, RunEvent::StepFailed { .. }))
+            .collect();
+        assert_eq!(
+            step_failed_events.len(),
+            1,
+            "exactly one StepFailed event must fire for sentinel line; got {:?}",
+            events
+        );
+    }
+
+    /// A line that does NOT match the sentinel must not produce a StepFailed event.
+    #[test]
+    fn non_sentinel_line_does_not_trigger_step_failed() {
+        let mut p = parser();
+        let events = p.feed(b"some regular output line\n");
         let has_step_failed = events
             .iter()
             .any(|e| matches!(e, RunEvent::StepFailed { .. }));
         assert!(
             !has_step_failed,
-            "StepFailed must not fire while sentinel is empty"
+            "non-sentinel line must not trigger StepFailed; got {:?}",
+            events
         );
     }
 
+    /// An empty line must NOT trigger StepFailed — the sentinel is non-empty.
     #[test]
     fn empty_line_does_not_trigger_step_failed() {
-        // Even an empty line (which equals the empty sentinel) should NOT fire
-        // StepFailed — the guard `!STEP_FAILED_SENTINEL.is_empty()` prevents it.
         let mut p = parser();
         let events = p.feed(b"\n");
         let has_step_failed = events
             .iter()
             .any(|e| matches!(e, RunEvent::StepFailed { .. }));
-        assert!(!has_step_failed, "empty sentinel must never match");
+        assert!(
+            !has_step_failed,
+            "empty line must never match sentinel; got {:?}",
+            events
+        );
+    }
+
+    /// The StepFailed event carries the sentinel line as its `message` field.
+    #[test]
+    fn step_failed_event_carries_sentinel_line_as_message() {
+        let mut p = parser();
+        let events = p.feed(b"STEP_FAILED\n");
+        let step_failed = events
+            .iter()
+            .find(|e| matches!(e, RunEvent::StepFailed { .. }))
+            .expect("expected a StepFailed event");
+        match step_failed {
+            RunEvent::StepFailed { message, .. } => {
+                assert_eq!(
+                    message,
+                    patterns::STEP_FAILED_SENTINEL,
+                    "StepFailed.message must equal the sentinel line"
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 
     // ── Pattern version constant ──────────────────────────────────────────────

@@ -45,6 +45,8 @@ fn write_meta(run_dir: &Path, id: &str, status: RunStatus, days_ago: i64) {
         exit_code: Some(0),
         pid: None,
         note: None,
+        exit_note: None,
+        retry_of: None,
     };
     let json = serde_json::to_string_pretty(&run).expect("serialize run");
     std::fs::write(run_dir.join("meta.json"), json).expect("write meta.json");
