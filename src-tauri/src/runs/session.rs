@@ -486,30 +486,21 @@ async fn handle_step_failure(
                     }
                 }
             }
-            // Wait up to 2 s for new stdout output.
+            // Wait up to 2 s for new stdout output (single select; no loop needed).
             let mut got_output = false;
-            let two_s_deadline = tokio::time::Instant::now() + Duration::from_millis(2000);
-            'continue_wait: loop {
-                let rem = two_s_deadline.saturating_duration_since(tokio::time::Instant::now());
-                if rem.is_zero() {
-                    break 'continue_wait;
-                }
-                tokio::select! {
-                    result = stdout.read(&mut stdout_buf) => {
-                        match result {
-                            Ok(0) | Err(_) => break 'continue_wait,
-                            Ok(n) => {
-                                got_output = true;
-                                let _ = process_stdout_chunk(
-                                    &stdout_buf[..n], run_id, writer, parser, app_handle,
-                                )
-                                .await;
-                                break 'continue_wait;
-                            }
+            tokio::select! {
+                result = stdout.read(&mut stdout_buf) => {
+                    if let Ok(n) = result {
+                        if n > 0 {
+                            got_output = true;
+                            let _ = process_stdout_chunk(
+                                &stdout_buf[..n], run_id, writer, parser, app_handle,
+                            )
+                            .await;
                         }
                     }
-                    _ = tokio::time::sleep(rem) => { break 'continue_wait; }
                 }
+                _ = tokio::time::sleep(Duration::from_millis(2000)) => {}
             }
 
             if got_output {
