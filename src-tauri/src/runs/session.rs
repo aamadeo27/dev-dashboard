@@ -203,7 +203,7 @@ async fn process_stdout_chunk(
 /// resolve statically.
 ///
 /// Returns `None` on error (errors are logged; the caller exits its own loop).
-pub(crate) async fn re_invoke_run(
+async fn re_invoke_run(
     original_run_id: &str,
     project_path: &Path,
     new_input: LaunchInput,
@@ -369,6 +369,231 @@ pub(crate) async fn re_invoke_run(
 // Background I/O loop
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Step-failure handler
+// ---------------------------------------------------------------------------
+
+/// Outcome returned by [`handle_step_failure`] to the I/O loop.
+enum StepFailureOutcome {
+    /// Child responded to the Continue newline — keep the outer loop running.
+    Continue,
+    /// Exit the outer I/O loop with the given state.
+    Break {
+        cancelled: bool,
+        exit_note: Option<String>,
+    },
+}
+
+/// Handle the step-failure protocol after a `StepFailed` event is detected.
+///
+/// Emits `run:step_failure`, waits up to 60 s for a [`StepFailureChoice`]
+/// (draining stdout/stderr in the meantime so the child does not block on a
+/// full pipe buffer), then applies the per-choice kill + re-invoke action per
+/// KB §9 item 3 (T4.8 option b).
+///
+/// Returns [`StepFailureOutcome`] so the caller can update `cancelled` /
+/// `exit_note` and decide whether to `break 'io`.
+#[allow(clippy::too_many_arguments)]
+async fn handle_step_failure(
+    run_id: &str,
+    app_handle: &tauri::AppHandle,
+    stdout: &mut tokio::process::ChildStdout,
+    stderr: &mut tokio::process::ChildStderr,
+    child: &mut tokio::process::Child,
+    writer: &mut TranscriptWriter,
+    parser: &mut EventParser,
+    stdin_arc: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
+    step_failure_rx: &mut tokio::sync::mpsc::Receiver<StepFailureChoice>,
+    cancel: &tokio_util::sync::CancellationToken,
+    launch_input: &LaunchInput,
+    cli_path: &Path,
+    attached_md_content: &Option<Vec<u8>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
+    project_path: &Path,
+) -> StepFailureOutcome {
+    tracing::info!(run_id = %run_id, "step failure detected");
+
+    // 1. Emit run:step_failure so the UI can prompt the user.
+    let sf_payload = serde_json::json!({ "run_id": run_id });
+    if let Err(e) = app_handle.emit(events::RUN_STEP_FAILURE, sf_payload) {
+        tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:step_failure");
+    }
+
+    // 2. Wait up to 60 s for a choice, draining stdout/stderr while waiting.
+    let mut stdout_buf = vec![0u8; 8192];
+    let mut stderr_buf = vec![0u8; 8192];
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+
+    let choice = 'sf_wait: loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            tracing::info!(run_id = %run_id, "step_failure: auto-Continue after 60 s timeout");
+            break 'sf_wait StepFailureChoice::Continue;
+        }
+
+        tokio::select! {
+            maybe_choice = step_failure_rx.recv() => {
+                break 'sf_wait maybe_choice.unwrap_or(StepFailureChoice::Continue);
+            }
+            result = stdout.read(&mut stdout_buf) => {
+                match result {
+                    Ok(0) | Err(_) => {
+                        // Child exited while waiting — treat as Continue and let
+                        // the outer loop detect EOF on next iteration.
+                        break 'sf_wait StepFailureChoice::Continue;
+                    }
+                    Ok(n) => {
+                        let _ = process_stdout_chunk(
+                            &stdout_buf[..n], run_id, writer, parser, app_handle,
+                        )
+                        .await;
+                    }
+                }
+            }
+            result = stderr.read(&mut stderr_buf) => {
+                match result {
+                    Ok(0) | Err(_) => {}
+                    Ok(n) => { let _ = writer.append_raw(&stderr_buf[..n]).await; }
+                }
+            }
+            _ = cancel.cancelled() => {
+                tracing::info!(run_id = %run_id, "run cancelled during step-failure wait");
+                if let Err(e) = child.kill().await {
+                    tracing::warn!(run_id = %run_id, error = %e, "child kill failed during sf wait");
+                }
+                return StepFailureOutcome::Break { cancelled: true, exit_note: None };
+            }
+            _ = tokio::time::sleep(remaining) => {
+                tracing::info!(run_id = %run_id, "step_failure: auto-Continue after 60 s timeout");
+                break 'sf_wait StepFailureChoice::Continue;
+            }
+        }
+    };
+
+    // 3. Apply the chosen action.
+    match choice {
+        StepFailureChoice::Continue => {
+            // Write "\n" to stdin to try to unblock the CLI.
+            {
+                let mut sg = stdin_arc.lock().await;
+                if let Some(ref mut stdin) = *sg {
+                    if let Err(e) = stdin.write_all(b"\n").await {
+                        tracing::warn!(
+                            run_id = %run_id,
+                            error = %e,
+                            "step_failure Continue: stdin write failed"
+                        );
+                    }
+                }
+            }
+            // Wait up to 2 s for new stdout output.
+            let mut got_output = false;
+            let two_s_deadline =
+                tokio::time::Instant::now() + Duration::from_millis(2000);
+            'continue_wait: loop {
+                let rem =
+                    two_s_deadline.saturating_duration_since(tokio::time::Instant::now());
+                if rem.is_zero() {
+                    break 'continue_wait;
+                }
+                tokio::select! {
+                    result = stdout.read(&mut stdout_buf) => {
+                        match result {
+                            Ok(0) | Err(_) => break 'continue_wait,
+                            Ok(n) => {
+                                got_output = true;
+                                let _ = process_stdout_chunk(
+                                    &stdout_buf[..n], run_id, writer, parser, app_handle,
+                                )
+                                .await;
+                                break 'continue_wait;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(rem) => { break 'continue_wait; }
+                }
+            }
+
+            if got_output {
+                tracing::info!(
+                    run_id = %run_id,
+                    "step_failure Continue: child produced output, resuming"
+                );
+                StepFailureOutcome::Continue
+            } else {
+                tracing::info!(
+                    run_id = %run_id,
+                    "step_failure Continue: no output in 2s, killing and re-invoking"
+                );
+                if let Err(e) = child.kill().await {
+                    tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Continue fallback)");
+                }
+                if let Some((new_id, new_ctx)) = re_invoke_run(
+                    run_id, project_path, launch_input.clone(),
+                    cli_path, attached_md_content, sessions,
+                )
+                .await
+                {
+                    spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
+                }
+                StepFailureOutcome::Break { cancelled: false, exit_note: None }
+            }
+        }
+
+        StepFailureChoice::Retry => {
+            tracing::info!(run_id = %run_id, "step_failure: Retry");
+            if let Err(e) = child.kill().await {
+                tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Retry)");
+            }
+            if let Some((new_id, new_ctx)) = re_invoke_run(
+                run_id, project_path, launch_input.clone(),
+                cli_path, attached_md_content, sessions,
+            )
+            .await
+            {
+                spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
+            }
+            StepFailureOutcome::Break { cancelled: false, exit_note: None }
+        }
+
+        StepFailureChoice::Skip => {
+            tracing::info!(run_id = %run_id, "step_failure: Skip");
+            let mut skip_input = launch_input.clone();
+            skip_input.sequence_name = format!(
+                "Skip the previous failing step and continue. {}",
+                launch_input.sequence_name
+            );
+            if let Err(e) = child.kill().await {
+                tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Skip)");
+            }
+            if let Some((new_id, new_ctx)) = re_invoke_run(
+                run_id, project_path, skip_input,
+                cli_path, attached_md_content, sessions,
+            )
+            .await
+            {
+                spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
+            }
+            StepFailureOutcome::Break { cancelled: false, exit_note: None }
+        }
+
+        StepFailureChoice::Abort => {
+            tracing::info!(run_id = %run_id, "step_failure: Abort");
+            if let Err(e) = child.kill().await {
+                tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Abort)");
+            }
+            StepFailureOutcome::Break {
+                cancelled: false,
+                exit_note: Some("Aborted by user".to_string()),
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background I/O helpers (spawn)
+// ---------------------------------------------------------------------------
+
 /// Helper: spawn a new `run_io_loop` task from the re-invoke context returned
 /// by `re_invoke_run`.  Extracted here so the `Instrument` import does not
 /// need to be pulled in at the call sites inside the loop body.
@@ -416,7 +641,7 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
 
     // ── Step 1: mark Running, write meta, emit run:started ──────────────────
 
-    let project_path = {
+    let (project_path, project_id) = {
         let mut run_guard = run.lock().await;
         run_guard.status = RunStatus::Running;
         run_guard.pid = child.id();
@@ -438,13 +663,11 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
             tracing::warn!(run_id = %run_id, error = %e, "failed to write meta on start");
         }
 
-        project_path
+        (project_path, project_id)
     };
 
-    let started_payload = {
-        let run_guard = run.lock().await;
-        serde_json::json!({ "run_id": run_id, "project_id": run_guard.project_id })
-    };
+    let started_payload =
+        serde_json::json!({ "run_id": run_id, "project_id": project_id });
     if let Err(e) = app_handle.emit(events::RUN_STARTED, started_payload) {
         tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:started");
     }
@@ -476,260 +699,31 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
 
                         if step_failed {
                             // ── Step-failure protocol (T4.7 / KB §9 item 3) ──────────
-                            tracing::info!(run_id = %run_id, "step failure detected");
-
-                            // 1. Emit run:step_failure so the UI can prompt the user.
-                            let sf_payload = serde_json::json!({ "run_id": run_id });
-                            if let Err(e) =
-                                app_handle.emit(events::RUN_STEP_FAILURE, sf_payload)
-                            {
-                                tracing::warn!(
-                                    run_id = %run_id,
-                                    error = %e,
-                                    "failed to emit run:step_failure"
-                                );
-                            }
-
-                            // 2. Wait up to 60 s for a choice from the command handler,
-                            //    while continuing to drain stdout/stderr so the child
-                            //    does not block on a full pipe buffer.
-                            let deadline = tokio::time::Instant::now()
-                                + Duration::from_secs(60);
-
-                            let choice = 'sf_wait: loop {
-                                let remaining = deadline
-                                    .saturating_duration_since(tokio::time::Instant::now());
-                                if remaining.is_zero() {
-                                    tracing::info!(
-                                        run_id = %run_id,
-                                        "step_failure: auto-Continue after 60 s timeout"
-                                    );
-                                    break 'sf_wait StepFailureChoice::Continue;
+                            let outcome = handle_step_failure(
+                                &run_id,
+                                &app_handle,
+                                &mut stdout,
+                                &mut stderr,
+                                &mut child,
+                                &mut writer,
+                                &mut parser,
+                                &stdin_arc,
+                                &mut step_failure_rx,
+                                &cancel,
+                                &launch_input,
+                                &cli_path,
+                                &attached_md_content,
+                                sessions.clone(),
+                                &project_path,
+                            )
+                            .await;
+                            match outcome {
+                                StepFailureOutcome::Continue => {
+                                    // Child responded — continue the outer loop normally.
                                 }
-
-                                tokio::select! {
-                                    maybe_choice = step_failure_rx.recv() => {
-                                        break 'sf_wait maybe_choice
-                                            .unwrap_or(StepFailureChoice::Continue);
-                                    }
-                                    result = stdout.read(&mut stdout_buf) => {
-                                        match result {
-                                            Ok(0) | Err(_) => {
-                                                // Child exited while waiting — treat as Continue
-                                                // and let the outer loop detect EOF next iter.
-                                                break 'sf_wait StepFailureChoice::Continue;
-                                            }
-                                            Ok(n) => {
-                                                let _ = process_stdout_chunk(
-                                                    &stdout_buf[..n],
-                                                    &run_id,
-                                                    &mut writer,
-                                                    &mut parser,
-                                                    &app_handle,
-                                                )
-                                                .await;
-                                            }
-                                        }
-                                    }
-                                    result = stderr.read(&mut stderr_buf) => {
-                                        match result {
-                                            Ok(0) | Err(_) => {}
-                                            Ok(n) => {
-                                                let _ = writer
-                                                    .append_raw(&stderr_buf[..n])
-                                                    .await;
-                                            }
-                                        }
-                                    }
-                                    _ = cancel.cancelled() => {
-                                        cancelled = true;
-                                        tracing::info!(
-                                            run_id = %run_id,
-                                            "run cancelled during step-failure wait"
-                                        );
-                                        if let Err(e) = child.kill().await {
-                                            tracing::warn!(
-                                                run_id = %run_id,
-                                                error = %e,
-                                                "child kill failed during sf wait"
-                                            );
-                                        }
-                                        break 'io;
-                                    }
-                                    _ = tokio::time::sleep(remaining) => {
-                                        tracing::info!(
-                                            run_id = %run_id,
-                                            "step_failure: auto-Continue after 60 s timeout"
-                                        );
-                                        break 'sf_wait StepFailureChoice::Continue;
-                                    }
-                                }
-                            };
-
-                            // 3. Apply the chosen action.
-                            match choice {
-                                StepFailureChoice::Continue => {
-                                    // Write "\n" to stdin to try to unblock the CLI.
-                                    {
-                                        let mut sg = stdin_arc.lock().await;
-                                        if let Some(ref mut stdin) = *sg {
-                                            if let Err(e) = stdin.write_all(b"\n").await {
-                                                tracing::warn!(
-                                                    run_id = %run_id,
-                                                    error = %e,
-                                                    "step_failure Continue: stdin write failed"
-                                                );
-                                            }
-                                        }
-                                    }
-                                    // Wait up to 2 s for new stdout output.
-                                    let mut got_output = false;
-                                    let two_s_deadline = tokio::time::Instant::now()
-                                        + Duration::from_millis(2000);
-                                    'continue_wait: loop {
-                                        let rem = two_s_deadline.saturating_duration_since(
-                                            tokio::time::Instant::now(),
-                                        );
-                                        if rem.is_zero() {
-                                            break 'continue_wait;
-                                        }
-                                        tokio::select! {
-                                            result = stdout.read(&mut stdout_buf) => {
-                                                match result {
-                                                    Ok(0) | Err(_) => break 'continue_wait,
-                                                    Ok(n) => {
-                                                        got_output = true;
-                                                        let _ = process_stdout_chunk(
-                                                            &stdout_buf[..n],
-                                                            &run_id,
-                                                            &mut writer,
-                                                            &mut parser,
-                                                            &app_handle,
-                                                        )
-                                                        .await;
-                                                        break 'continue_wait;
-                                                    }
-                                                }
-                                            }
-                                            _ = tokio::time::sleep(rem) => {
-                                                break 'continue_wait;
-                                            }
-                                        }
-                                    }
-
-                                    if got_output {
-                                        // Child responded — continue the outer loop normally.
-                                        tracing::info!(
-                                            run_id = %run_id,
-                                            "step_failure Continue: child produced output, resuming"
-                                        );
-                                        // Fall through to next 'io iteration.
-                                    } else {
-                                        // No output in 2 s — kill + re-invoke.
-                                        tracing::info!(
-                                            run_id = %run_id,
-                                            "step_failure Continue: no output in 2s, \
-                                             killing and re-invoking"
-                                        );
-                                        if let Err(e) = child.kill().await {
-                                            tracing::warn!(
-                                                run_id = %run_id,
-                                                error = %e,
-                                                "child kill failed (Continue fallback)"
-                                            );
-                                        }
-                                        if let Some((new_id, new_ctx)) = re_invoke_run(
-                                            &run_id,
-                                            &project_path,
-                                            launch_input.clone(),
-                                            &cli_path,
-                                            &attached_md_content,
-                                            sessions.clone(),
-                                        )
-                                        .await
-                                        {
-                                            spawn_reinvoke_task(
-                                                app_handle.clone(),
-                                                new_id,
-                                                new_ctx,
-                                            );
-                                        }
-                                        break 'io;
-                                    }
-                                }
-
-                                StepFailureChoice::Retry => {
-                                    tracing::info!(run_id = %run_id, "step_failure: Retry");
-                                    if let Err(e) = child.kill().await {
-                                        tracing::warn!(
-                                            run_id = %run_id,
-                                            error = %e,
-                                            "child kill failed (Retry)"
-                                        );
-                                    }
-                                    if let Some((new_id, new_ctx)) = re_invoke_run(
-                                        &run_id,
-                                        &project_path,
-                                        launch_input.clone(),
-                                        &cli_path,
-                                        &attached_md_content,
-                                        sessions.clone(),
-                                    )
-                                    .await
-                                    {
-                                        spawn_reinvoke_task(
-                                            app_handle.clone(),
-                                            new_id,
-                                            new_ctx,
-                                        );
-                                    }
-                                    break 'io;
-                                }
-
-                                StepFailureChoice::Skip => {
-                                    tracing::info!(run_id = %run_id, "step_failure: Skip");
-                                    let mut skip_input = launch_input.clone();
-                                    skip_input.sequence_name = format!(
-                                        "Skip the previous failing step and continue. {}",
-                                        launch_input.sequence_name
-                                    );
-                                    if let Err(e) = child.kill().await {
-                                        tracing::warn!(
-                                            run_id = %run_id,
-                                            error = %e,
-                                            "child kill failed (Skip)"
-                                        );
-                                    }
-                                    if let Some((new_id, new_ctx)) = re_invoke_run(
-                                        &run_id,
-                                        &project_path,
-                                        skip_input,
-                                        &cli_path,
-                                        &attached_md_content,
-                                        sessions.clone(),
-                                    )
-                                    .await
-                                    {
-                                        spawn_reinvoke_task(
-                                            app_handle.clone(),
-                                            new_id,
-                                            new_ctx,
-                                        );
-                                    }
-                                    break 'io;
-                                }
-
-                                StepFailureChoice::Abort => {
-                                    tracing::info!(run_id = %run_id, "step_failure: Abort");
-                                    if let Err(e) = child.kill().await {
-                                        tracing::warn!(
-                                            run_id = %run_id,
-                                            error = %e,
-                                            "child kill failed (Abort)"
-                                        );
-                                    }
-                                    step_failure_exit_note =
-                                        Some("Aborted by user".to_string());
+                                StepFailureOutcome::Break { cancelled: c, exit_note } => {
+                                    cancelled = c;
+                                    step_failure_exit_note = exit_note;
                                     break 'io;
                                 }
                             }

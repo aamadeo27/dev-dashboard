@@ -29,5 +29,3 @@ dist-ssr
 src-tauri/target/
 
 .claude/
-# DevTeam config — not tracked per-machine
-.devteam/
