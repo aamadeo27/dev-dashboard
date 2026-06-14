@@ -488,11 +488,9 @@ async fn handle_step_failure(
             }
             // Wait up to 2 s for new stdout output.
             let mut got_output = false;
-            let two_s_deadline =
-                tokio::time::Instant::now() + Duration::from_millis(2000);
+            let two_s_deadline = tokio::time::Instant::now() + Duration::from_millis(2000);
             'continue_wait: loop {
-                let rem =
-                    two_s_deadline.saturating_duration_since(tokio::time::Instant::now());
+                let rem = two_s_deadline.saturating_duration_since(tokio::time::Instant::now());
                 if rem.is_zero() {
                     break 'continue_wait;
                 }
@@ -529,14 +527,21 @@ async fn handle_step_failure(
                     tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Continue fallback)");
                 }
                 if let Some((new_id, new_ctx)) = re_invoke_run(
-                    run_id, project_path, launch_input.clone(),
-                    cli_path, attached_md_content, sessions,
+                    run_id,
+                    project_path,
+                    launch_input.clone(),
+                    cli_path,
+                    attached_md_content,
+                    sessions,
                 )
                 .await
                 {
                     spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
                 }
-                StepFailureOutcome::Break { cancelled: false, exit_note: None }
+                StepFailureOutcome::Break {
+                    cancelled: false,
+                    exit_note: None,
+                }
             }
         }
 
@@ -546,14 +551,21 @@ async fn handle_step_failure(
                 tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Retry)");
             }
             if let Some((new_id, new_ctx)) = re_invoke_run(
-                run_id, project_path, launch_input.clone(),
-                cli_path, attached_md_content, sessions,
+                run_id,
+                project_path,
+                launch_input.clone(),
+                cli_path,
+                attached_md_content,
+                sessions,
             )
             .await
             {
                 spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
             }
-            StepFailureOutcome::Break { cancelled: false, exit_note: None }
+            StepFailureOutcome::Break {
+                cancelled: false,
+                exit_note: None,
+            }
         }
 
         StepFailureChoice::Skip => {
@@ -567,14 +579,21 @@ async fn handle_step_failure(
                 tracing::warn!(run_id = %run_id, error = %e, "child kill failed (Skip)");
             }
             if let Some((new_id, new_ctx)) = re_invoke_run(
-                run_id, project_path, skip_input,
-                cli_path, attached_md_content, sessions,
+                run_id,
+                project_path,
+                skip_input,
+                cli_path,
+                attached_md_content,
+                sessions,
             )
             .await
             {
                 spawn_reinvoke_task(app_handle.clone(), new_id, new_ctx);
             }
-            StepFailureOutcome::Break { cancelled: false, exit_note: None }
+            StepFailureOutcome::Break {
+                cancelled: false,
+                exit_note: None,
+            }
         }
 
         StepFailureChoice::Abort => {
@@ -597,11 +616,7 @@ async fn handle_step_failure(
 /// Helper: spawn a new `run_io_loop` task from the re-invoke context returned
 /// by `re_invoke_run`.  Extracted here so the `Instrument` import does not
 /// need to be pulled in at the call sites inside the loop body.
-fn spawn_reinvoke_task(
-    app_handle: tauri::AppHandle,
-    new_run_id: String,
-    ctx: RunIoContext,
-) {
+fn spawn_reinvoke_task(app_handle: tauri::AppHandle, new_run_id: String, ctx: RunIoContext) {
     use tracing::Instrument;
     let span = tracing::info_span!("run_session", run_id = %new_run_id);
     tokio::task::spawn(run_io_loop(app_handle, new_run_id, ctx).instrument(span));
@@ -666,8 +681,7 @@ pub async fn run_io_loop(app_handle: tauri::AppHandle, run_id: String, ctx: RunI
         (project_path, project_id)
     };
 
-    let started_payload =
-        serde_json::json!({ "run_id": run_id, "project_id": project_id });
+    let started_payload = serde_json::json!({ "run_id": run_id, "project_id": project_id });
     if let Err(e) = app_handle.emit(events::RUN_STARTED, started_payload) {
         tracing::warn!(run_id = %run_id, error = %e, "failed to emit run:started");
     }
@@ -1197,14 +1211,11 @@ mod tests {
             (StepFailureChoice::Abort, "\"Abort\""),
         ];
         for (variant, expected_json) in cases {
-            let serialized = serde_json::to_string(&variant)
-                .expect("StepFailureChoice must serialize");
-            assert_eq!(
-                serialized, expected_json,
-                "variant serialization mismatch"
-            );
-            let deserialized: StepFailureChoice = serde_json::from_str(&serialized)
-                .expect("StepFailureChoice must deserialize");
+            let serialized =
+                serde_json::to_string(&variant).expect("StepFailureChoice must serialize");
+            assert_eq!(serialized, expected_json, "variant serialization mismatch");
+            let deserialized: StepFailureChoice =
+                serde_json::from_str(&serialized).expect("StepFailureChoice must deserialize");
             // Re-serialize to compare (enum doesn't implement PartialEq).
             let re_serialized = serde_json::to_string(&deserialized).unwrap();
             assert_eq!(re_serialized, expected_json, "round-trip failed");
@@ -1229,8 +1240,8 @@ mod tests {
             "pid": null,
             "note": null
         }"#;
-        let run: Run = serde_json::from_str(json)
-            .expect("must deserialize without exit_note / retry_of");
+        let run: Run =
+            serde_json::from_str(json).expect("must deserialize without exit_note / retry_of");
         assert!(
             run.exit_note.is_none(),
             "exit_note must default to None when absent"
@@ -1301,10 +1312,7 @@ mod tests {
     #[test]
     fn skip_prefix_format_is_correct() {
         let original = "my task";
-        let prefixed = format!(
-            "Skip the previous failing step and continue. {}",
-            original
-        );
+        let prefixed = format!("Skip the previous failing step and continue. {}", original);
         assert_eq!(
             prefixed,
             "Skip the previous failing step and continue. my task"

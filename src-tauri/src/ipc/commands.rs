@@ -955,13 +955,11 @@ pub async fn respond_to_step_failure(
         Some(h) => h,
     };
 
-    handle
-        .step_failure_tx
-        .send(choice)
-        .await
-        .map_err(|_| AppError::InvalidInput(
+    handle.step_failure_tx.send(choice).await.map_err(|_| {
+        AppError::InvalidInput(
             "run is not awaiting a step-failure response (channel closed)".to_string(),
-        ))?;
+        )
+    })?;
 
     tracing::info!(run_id = %run_id, "respond_to_step_failure: choice sent");
     Ok(())
@@ -1576,9 +1574,7 @@ mod tests {
                 .step_failure_tx
                 .send(crate::runs::StepFailureChoice::Continue)
                 .await
-                .map_err(|_| {
-                    AppError::InvalidInput("channel closed".to_string())
-                }),
+                .map_err(|_| AppError::InvalidInput("channel closed".to_string())),
         };
 
         assert!(
