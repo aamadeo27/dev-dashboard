@@ -192,8 +192,17 @@ export function refreshSequences(projectId: string): Promise<Sequence[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Run commands (T4.3)
+// Run commands (T4.3 / T5.10)
 // ---------------------------------------------------------------------------
+
+/**
+ * Return all runs for a project, newest first (meta.json only — no transcript).
+ *
+ * Throws `AppError` with code `"NOT_FOUND"` if no project has the given id.
+ */
+export function listRuns(projectId: string): Promise<Run[]> {
+  return invoke<Run[]>("list_runs", { projectId });
+}
 
 /**
  * Launch a Claude CLI child process for the given project and sequence.

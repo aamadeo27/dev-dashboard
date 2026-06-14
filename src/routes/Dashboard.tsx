@@ -5,12 +5,15 @@ import type React from "react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ContextMenu, { type ContextMenuItem } from "../components/ContextMenu";
+import LaunchModal from "../components/LaunchModal";
 import { ProjectCard, ProjectCardSkeleton } from "../components/ProjectCard";
 import RateLimitPill from "../components/RateLimitPill";
 import TagEditorPopover from "../components/TagEditorPopover";
 import { useGitStatus, useGitStatusListener, useVisibleProjects } from "../hooks/useGitStatus";
 import { PROJECTS_QUERY_KEY, useProjects } from "../hooks/useProjects";
+import { RUN_HISTORY_QUERY_KEY, useRunHistory } from "../hooks/useRunHistory";
 import { useSettings } from "../hooks/useSettings";
+import type { Run } from "../ipc/bindings";
 import type { Project } from "../ipc/bindings";
 import {
   addProject,
@@ -47,6 +50,8 @@ const ProjectCardWrapper = memo(function ProjectCardWrapper({
   onCancelRemove: () => void;
 }) {
   const gitStatus = useGitStatus(project.id);
+  const { data: runs, isLoading: runsLoading } = useRunHistory(project.id);
+  const lastRun: Run | null | undefined = runsLoading ? undefined : (runs?.[0] ?? null);
   const id = project.id;
 
   const handleCardClick = useCallback(() => onCardClick(id), [onCardClick, id]);
@@ -126,7 +131,7 @@ const ProjectCardWrapper = memo(function ProjectCardWrapper({
     <ProjectCard
       project={project}
       gitStatus={gitStatus ?? undefined}
-      lastRun={undefined}
+      lastRun={lastRun}
       activeRun={undefined}
       onCardClick={handleCardClick}
       onQuickRun={handleQuickRun}
@@ -160,6 +165,10 @@ export default function Dashboard() {
     y: number;
   } | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [launchModal, setLaunchModal] = useState<{
+    projectId: string;
+    sequenceName: string;
+  } | null>(null);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const closeTagEditor = useCallback(() => setTagEditorProject(null), []);
@@ -207,8 +216,18 @@ export default function Dashboard() {
     [navigate]
   );
 
-  // TODO: implement quick-run (navigate to Project Detail with Sequences panel or open Launch Modal)
-  const handleQuickRun = useCallback((_projectId: string) => {}, []);
+  const handleQuickRun = useCallback(
+    (projectId: string) => {
+      const runs = queryClient.getQueryData<Run[]>(RUN_HISTORY_QUERY_KEY(projectId));
+      if (runs === undefined) return; // run data still loading → no-op
+      if (runs.length === 0) {
+        navigate(`/projects/${projectId}`, { state: { focusSequences: true } });
+      } else {
+        setLaunchModal({ projectId, sequenceName: runs[0].sequence_name });
+      }
+    },
+    [queryClient, navigate]
+  );
 
   const handleTagsChange = useCallback(
     (projectId: string, tags: string[]) => {
@@ -472,6 +491,13 @@ export default function Dashboard() {
           y={tagEditorProject.y}
           onClose={closeTagEditor}
           onTagsChange={handleTagsChange}
+        />
+      )}
+      {launchModal && (
+        <LaunchModal
+          projectId={launchModal.projectId}
+          sequenceName={launchModal.sequenceName}
+          onClose={() => setLaunchModal(null)}
         />
       )}
     </div>
