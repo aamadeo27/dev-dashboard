@@ -30,3 +30,6 @@ src-tauri/target/
 
 .claude/
 .worktrees/
+
+# DevTeam config — not tracked per-machine
+.devteam/
